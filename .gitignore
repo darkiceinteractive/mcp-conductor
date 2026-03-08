@@ -29,7 +29,6 @@ tmp/
 
 # npm
 *.tgz
-package-lock.json
 
 # Claude / OMC session files (private, not for public repo)
 .claude/
@@ -44,7 +43,7 @@ package-lock.json
 CLAUDE.md
 templates/
 
-# Marketing/article content (lives in separate repo)
+# Marketing/article content (lives in darkiceinteractive/online-articles)
 docs/articles/
 docs/gists/
 docs/images/
