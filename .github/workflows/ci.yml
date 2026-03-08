@@ -1,0 +1,60 @@
+name: validate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: npm ci
+
+      - name: Stamp build number
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          BUILD=${{ github.run_number }}
+          cat > src/version.ts << EOF
+          export const VERSION = '${VERSION}';
+          export const BUILD_NUMBER = ${BUILD};
+          export const BUILD_STRING = '${VERSION} (build ${BUILD})';
+          EOF
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test:run
+        env:
+          DENO_AVAILABLE: true
+
+      - name: Coverage
+        if: matrix.node-version == '20.x'
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        if: matrix.node-version == '20.x'
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+        continue-on-error: true

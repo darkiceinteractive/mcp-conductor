@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.log
+tmp/
+
+# npm
+*.tgz
+package-lock.json
+
+# Claude / OMC session files (private, not for public repo)
+.claude/
+.omc/
+.claude-resume.md
+
+# Binary / archive artifacts
+*.zip
+*.docx
+
+# Dev-only config
+CLAUDE.md
+templates/
+
+# Marketing/article content (lives in separate repo)
+docs/articles/
+docs/gists/
+docs/images/

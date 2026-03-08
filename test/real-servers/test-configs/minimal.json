@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "test-echo": {
+      "command": "npx",
+      "args": ["tsx", "test/real-servers/test-echo-server/index.ts"]
+    }
+  }
+}

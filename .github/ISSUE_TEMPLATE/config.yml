@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Ask a Question
+    url: https://github.com/darkiceinteractive/mcp-conductor/discussions/new?category=q-a
+    about: Have a question about how mcp-conductor works? Start a discussion — we're happy to help.
+  - name: Show & Tell
+    url: https://github.com/darkiceinteractive/mcp-conductor/discussions/new?category=show-and-tell
+    about: Built something cool with mcp-conductor? Share it with the community!
+  - name: Ideas & RFC
+    url: https://github.com/darkiceinteractive/mcp-conductor/discussions/new?category=ideas
+    about: Have a rough idea you'd like feedback on before filing a feature request? Start here.

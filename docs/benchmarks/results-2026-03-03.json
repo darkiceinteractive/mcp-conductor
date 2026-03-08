@@ -1,0 +1,261 @@
+{
+  "generatedAt": "2026-03-03T02:23:37.572Z",
+  "methodology": "Deterministic token-savings simulation using MetricsCollector formula. See docs/benchmarks/methodology.md.",
+  "formula": {
+    "passthroughTokens": "passthroughTokens = (toolCalls × 150) + (dataBytes / 1024 × 256)",
+    "executionTokens": "executionTokens   = ceil(codeChars / 3.5) + ceil(resultJson.length / 3.8)",
+    "compressionPct": "compressionPct    = (passthroughTokens − executionTokens) / passthroughTokens × 100"
+  },
+  "pricing": {
+    "haikuInput": 0.8,
+    "sonnetInput": 3,
+    "opusInput": 15
+  },
+  "scales": [
+    {
+      "scale": "small",
+      "label": "Small (Solo Dev)",
+      "description": "Solo developer, occasional MCP use. 1–5 tool calls, 5–15 KB total data.",
+      "toolCallRange": [
+        1,
+        5
+      ],
+      "dataSizeKbRange": [
+        5,
+        15
+      ],
+      "scenarios": [
+        {
+          "name": "github-issues-fetch",
+          "description": "Fetch 5 open GitHub issues with labels and assignees via GitHub MCP",
+          "toolCalls": 1,
+          "dataKb": 3,
+          "passthroughTokens": 1025,
+          "executionTokens": 139,
+          "tokensSaved": 886,
+          "compressionPct": 86.44,
+          "haikuSavingsUsd": 0.00071,
+          "sonnetSavingsUsd": 0.00266,
+          "opusSavingsUsd": 0.0133
+        },
+        {
+          "name": "filesystem-dir-listing",
+          "description": "List and categorise 30 files in a TypeScript project root",
+          "toolCalls": 1,
+          "dataKb": 4,
+          "passthroughTokens": 1275,
+          "executionTokens": 87,
+          "tokensSaved": 1188,
+          "compressionPct": 93.18,
+          "haikuSavingsUsd": 0.00095,
+          "sonnetSavingsUsd": 0.00356,
+          "opusSavingsUsd": 0.0178
+        },
+        {
+          "name": "brave-search-single",
+          "description": "Single Brave web search — top 5 results for a technical query",
+          "toolCalls": 1,
+          "dataKb": 2,
+          "passthroughTokens": 775,
+          "executionTokens": 102,
+          "tokensSaved": 673,
+          "compressionPct": 86.84,
+          "haikuSavingsUsd": 0.00054,
+          "sonnetSavingsUsd": 0.00202,
+          "opusSavingsUsd": 0.0101
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 88.82,
+        "avgTokensSaved": 916,
+        "totalTokensSaved": 2747,
+        "avgSonnetSavingsUsd": 0.0027
+      }
+    },
+    {
+      "scale": "medium",
+      "label": "Medium (Active Team)",
+      "description": "Active dev team, daily use. 5–25 tool calls, 15–100 KB total data.",
+      "toolCallRange": [
+        5,
+        25
+      ],
+      "dataSizeKbRange": [
+        15,
+        100
+      ],
+      "scenarios": [
+        {
+          "name": "sprint-dashboard",
+          "description": "Pull sprint dashboard: 25 issues + 8 open PRs + CI status in one execution",
+          "toolCalls": 3,
+          "dataKb": 18,
+          "passthroughTokens": 4950,
+          "executionTokens": 191,
+          "tokensSaved": 4759,
+          "compressionPct": 96.14,
+          "haikuSavingsUsd": 0.00381,
+          "sonnetSavingsUsd": 0.01428,
+          "opusSavingsUsd": 0.0714
+        },
+        {
+          "name": "codebase-scan",
+          "description": "Scan 200-file codebase for TODO comments, complexity, and debt metrics",
+          "toolCalls": 8,
+          "dataKb": 41,
+          "passthroughTokens": 11700,
+          "executionTokens": 238,
+          "tokensSaved": 11462,
+          "compressionPct": 97.97,
+          "haikuSavingsUsd": 0.00917,
+          "sonnetSavingsUsd": 0.03439,
+          "opusSavingsUsd": 0.1719
+        },
+        {
+          "name": "parallel-web-research",
+          "description": "3 parallel Brave searches for competitive analysis, results synthesised",
+          "toolCalls": 3,
+          "dataKb": 8,
+          "passthroughTokens": 2575,
+          "executionTokens": 188,
+          "tokensSaved": 2387,
+          "compressionPct": 92.7,
+          "haikuSavingsUsd": 0.00191,
+          "sonnetSavingsUsd": 0.00716,
+          "opusSavingsUsd": 0.0358
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 95.6,
+        "avgTokensSaved": 6203,
+        "totalTokensSaved": 18608,
+        "avgSonnetSavingsUsd": 0.0186
+      }
+    },
+    {
+      "scale": "large",
+      "label": "Large (Engineering Org)",
+      "description": "Engineering org, automated workflows. 25–100 tool calls, 100–500 KB total data.",
+      "toolCallRange": [
+        25,
+        100
+      ],
+      "dataSizeKbRange": [
+        100,
+        500
+      ],
+      "scenarios": [
+        {
+          "name": "issue-triage-filetree",
+          "description": "100-issue triage with full file tree and circular-dependency check",
+          "toolCalls": 12,
+          "dataKb": 109,
+          "passthroughTokens": 29800,
+          "executionTokens": 334,
+          "tokensSaved": 29466,
+          "compressionPct": 98.88,
+          "haikuSavingsUsd": 0.02357,
+          "sonnetSavingsUsd": 0.0884,
+          "opusSavingsUsd": 0.442
+        },
+        {
+          "name": "multi-repo-analysis",
+          "description": "Cross-repo dependency analysis across 5 microservices with version conflict detection",
+          "toolCalls": 25,
+          "dataKb": 145,
+          "passthroughTokens": 40750,
+          "executionTokens": 410,
+          "tokensSaved": 40340,
+          "compressionPct": 98.99,
+          "haikuSavingsUsd": 0.03227,
+          "sonnetSavingsUsd": 0.12102,
+          "opusSavingsUsd": 0.6051
+        },
+        {
+          "name": "parallel-search-github",
+          "description": "10 parallel web searches combined with 12 GitHub API calls for market intelligence",
+          "toolCalls": 22,
+          "dataKb": 88,
+          "passthroughTokens": 25700,
+          "executionTokens": 329,
+          "tokensSaved": 25371,
+          "compressionPct": 98.72,
+          "haikuSavingsUsd": 0.0203,
+          "sonnetSavingsUsd": 0.07611,
+          "opusSavingsUsd": 0.3806
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 98.86,
+        "avgTokensSaved": 31726,
+        "totalTokensSaved": 95177,
+        "avgSonnetSavingsUsd": 0.0952
+      }
+    },
+    {
+      "scale": "enterprise",
+      "label": "Enterprise (CI/CD Automation)",
+      "description": "CI/CD automation, high volume. 100+ tool calls, 500 KB–2 MB total data.",
+      "toolCallRange": [
+        100,
+        500
+      ],
+      "dataSizeKbRange": [
+        500,
+        2048
+      ],
+      "scenarios": [
+        {
+          "name": "backlog-scan-500",
+          "description": "500-issue backlog scan with full metadata, labels, cross-references, and forecasting",
+          "toolCalls": 52,
+          "dataKb": 375,
+          "passthroughTokens": 103800,
+          "executionTokens": 694,
+          "tokensSaved": 103106,
+          "compressionPct": 99.33,
+          "haikuSavingsUsd": 0.08248,
+          "sonnetSavingsUsd": 0.30932,
+          "opusSavingsUsd": 1.5466
+        },
+        {
+          "name": "dependency-audit-monorepo",
+          "description": "Full dependency audit: 8 packages, lockfile analysis, CVE scan, licence check",
+          "toolCalls": 64,
+          "dataKb": 549,
+          "passthroughTokens": 150100,
+          "executionTokens": 899,
+          "tokensSaved": 149201,
+          "compressionPct": 99.4,
+          "haikuSavingsUsd": 0.11936,
+          "sonnetSavingsUsd": 0.4476,
+          "opusSavingsUsd": 2.238
+        },
+        {
+          "name": "daily-digest-5-repos",
+          "description": "Automated daily digest across 5 repos: commits, PRs, builds, alerts, coverage",
+          "toolCalls": 85,
+          "dataKb": 800,
+          "passthroughTokens": 217550,
+          "executionTokens": 1089,
+          "tokensSaved": 216461,
+          "compressionPct": 99.5,
+          "haikuSavingsUsd": 0.17317,
+          "sonnetSavingsUsd": 0.64938,
+          "opusSavingsUsd": 3.2469
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 99.41,
+        "avgTokensSaved": 156256,
+        "totalTokensSaved": 468768,
+        "avgSonnetSavingsUsd": 0.4688
+      }
+    }
+  ],
+  "overall": {
+    "avgCompressionPct": 95.67,
+    "peakCompressionPct": 99.5,
+    "minCompressionPct": 86.44
+  }
+}
