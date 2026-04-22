@@ -145,6 +145,14 @@ export class MCPExecutorServer {
 **Example:** \`const files = await mcp.filesystem.call('list_directory', { path: '/src' }); return files;\`
 
 Use passthrough_call only for debugging - it has HIGH token cost.`,
+        annotations: {
+          // execute_code proxies arbitrary code that can call any backend MCP
+          // tool, so it inherits the most permissive capability surface.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {
           code: z.string().describe('TypeScript/JavaScript code to execute. Must include a return statement.'),
           servers: z.array(z.string()).optional().describe('Optional: List of MCP server names to load.'),
@@ -239,6 +247,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'List Servers',
         description: 'List all MCP servers connected through MCP Executor.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           include_tools: z.boolean().optional().describe('If true, include list of tool names.'),
         },
@@ -300,6 +313,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Discover Tools',
         description: 'Search for available tools across all connected MCP servers.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           query: z.string().optional().describe('Search query. Matches against tool names and descriptions.'),
           server: z.string().optional().describe('Optional: limit search to a specific server.'),
@@ -391,6 +409,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Get Metrics',
         description: 'Get detailed aggregated metrics for the current session including token savings, performance, and usage patterns.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           reset: z.boolean().optional().describe('Reset metrics after returning.'),
           include_details: z.boolean().optional().describe('Include detailed breakdowns (servers, tools, recent executions).'),
@@ -510,6 +533,13 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
 - execution: All requests go through the code executor (default, maximum token savings)
 - passthrough: Direct tool calls without code execution (for debugging/comparison)
 - hybrid: Automatic selection based on task complexity`,
+        annotations: {
+          // Changes global server behaviour; future tool calls take the new path.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           mode: z.enum(['execution', 'passthrough', 'hybrid']).describe('The operation mode to switch to.'),
         },
@@ -543,6 +573,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Reload Servers',
         description: 'Reload MCP server configurations. Useful after modifying claude_desktop_config.json.',
+        annotations: {
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {},
         outputSchema: {
           added: z.array(z.string()),
@@ -574,6 +609,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Get Capabilities',
         description: 'Get detailed information about MCP Executor capabilities and configuration.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {},
         outputSchema: {
           version: z.string(),
@@ -638,6 +678,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
         title: 'Compare Modes',
         description: `Analyse how a task would be handled in different modes.
 Returns estimated token usage and approach for each mode.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           task_description: z.string().describe('Description of the task to analyse.'),
           estimated_tool_calls: z.number().optional().describe('Estimated number of tool calls needed.'),
@@ -726,6 +771,14 @@ Returns estimated token usage and approach for each mode.`,
         description: `⚠️ DEBUGGING TOOL - Direct MCP tool call. HIGH TOKEN COST (10-100x vs execute_code).
 
 Only use for debugging raw tool input/output. Use execute_code for all normal operations.`,
+        annotations: {
+          // Proxies into a backend MCP server so the effect depends on the
+          // downstream tool. Conservative defaults: assume external + mutable.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {
           server: z.string().describe('Name of the MCP server to call.'),
           tool: z.string().describe('Name of the tool to invoke.'),
@@ -884,6 +937,11 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
         description: `Web search via Brave Search API. Uses 90% fewer tokens than native WebSearch.
 
 Routes to brave-search MCP server internally. Requires brave-search server to be configured.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: false, // Web results change between calls
+          openWorldHint: true,
+        },
         inputSchema: {
           query: z.string().describe('Search query (max 400 chars, 50 words).'),
           count: z.number().optional().describe('Number of results (1-20, default 10).'),
@@ -954,6 +1012,12 @@ Routes to brave-search MCP server internally. Requires brave-search server to be
 
 Saves the server configuration to ~/.mcp-conductor.json and triggers a reload.
 Use this to dynamically add servers without restarting Claude.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false, // Adds a new server; not destructive by itself
+          idempotentHint: false, // Re-adding the same name returns an error
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Unique server name (e.g., "github", "filesystem").'),
           command: z.string().describe('Command to run the server (e.g., "npx", "node", "python").'),
@@ -1051,6 +1115,12 @@ Use this to dynamically add servers without restarting Claude.`,
 
 Removes the server configuration from ~/.mcp-conductor.json and triggers a reload.
 Use this to dynamically remove servers without restarting Claude.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true, // Removing an already-gone server is a safe no-op
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Name of the server to remove.'),
         },
@@ -1146,6 +1216,12 @@ Use this to dynamically remove servers without restarting Claude.`,
 
 Use this to update API keys or other settings without removing and re-adding the server.
 Triggers a reload to apply changes immediately.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true, // Overwrites existing config; may disconnect/reconnect
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Name of the server to update.'),
           command: z.string().optional().describe('New command (optional, keeps existing if not provided).'),
@@ -1277,6 +1353,11 @@ Triggers a reload to apply changes immediately.`,
       {
         title: 'Get Memory Stats',
         description: 'Returns live memory usage and resource counts for the conductor process. Use this to diagnose memory issues.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {},
         outputSchema: {
           heap_used_mb: z.number(),
