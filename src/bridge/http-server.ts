@@ -172,14 +172,86 @@ export class HttpBridge {
   }
 
   /**
+   * Return true if a bare hostname (no brackets, no port) is loopback.
+   */
+  private static isLoopbackHostname(hostname: string | undefined): boolean {
+    if (!hostname) return false;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  }
+
+  /**
+   * Extract the bare hostname from a `Host` header (`host[:port]` or
+   * `[ipv6]:port`). Returns undefined for malformed values.
+   */
+  private static extractHostHeaderName(header: string | undefined): string | undefined {
+    if (!header) return undefined;
+    if (header.startsWith('[')) {
+      // IPv6 bracketed form: `[::1]:PORT`
+      const close = header.indexOf(']');
+      return close > 0 ? header.substring(1, close) : undefined;
+    }
+    // IPv4 or DNS hostname — strip any single :port suffix.
+    return header.split(':')[0];
+  }
+
+  /**
+   * Extract hostname from an `Origin` header (a full URL like
+   * `http://example.com:8080`). Returns undefined for malformed values.
+   *
+   * Node's WHATWG URL keeps IPv6 addresses in bracketed form (`[::1]`) on
+   * the `hostname` property, so strip the brackets for comparison.
+   */
+  private static extractOriginHostname(header: string | undefined): string | undefined {
+    if (!header) return undefined;
+    try {
+      const raw = new URL(header).hostname;
+      return raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Handle incoming HTTP request
    */
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // DNS-rebinding guard: reject requests whose Host or Origin claims a
+    // non-localhost origin. Per MCP spec 2025-03-26 transport requirements.
+    // A page on evil.com can make a browser issue requests to our bridge by
+    // resolving the attacker's hostname to 127.0.0.1, but the Host/Origin
+    // headers still carry evil.com — so we must validate those, not just the
+    // socket address.
+    const hostHeader = req.headers.host;
+    const originHeader = req.headers.origin;
+
+    if (!HttpBridge.isLoopbackHostname(HttpBridge.extractHostHeaderName(hostHeader))) {
+      logger.warn('Rejecting bridge request with non-localhost Host', { host: hostHeader });
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Host header not allowed' }));
+      return;
+    }
+
+    if (originHeader) {
+      if (!HttpBridge.isLoopbackHostname(HttpBridge.extractOriginHostname(originHeader))) {
+        logger.warn('Rejecting bridge request with non-localhost Origin', { origin: originHeader });
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Origin not allowed' }));
+        return;
+      }
+    }
+
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
     const method = req.method || 'GET';
 
-    // Enable CORS for local requests
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS: echo a localhost Origin back exactly, or set a benign default.
+    // Never answer `*` because that would pair with the loopback-only Host
+    // guard above to still leak bridge output to browser contexts on the
+    // same machine that we didn't verify.
+    res.setHeader(
+      'Access-Control-Allow-Origin',
+      originHeader ?? `http://${hostHeader ?? '127.0.0.1'}`,
+    );
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
