@@ -25,6 +25,7 @@
 
 import { MCPExecutorServer } from './server/index.js';
 import { loadConfig } from './config/index.js';
+import { LIFECYCLE_TIMEOUTS } from './config/defaults.js';
 import { logger } from './utils/index.js';
 import { BUILD_STRING } from './version.js';
 
@@ -44,18 +45,56 @@ async function main(): Promise<void> {
   // Create and start server
   const server = new MCPExecutorServer(config);
 
-  // Handle shutdown gracefully
+  // Handle shutdown gracefully with timeout guard
+  let isShuttingDown = false;
   const shutdown = async () => {
+    if (isShuttingDown) return; // Prevent double-shutdown
+    isShuttingDown = true;
+
     logger.info('Shutting down...');
-    await server.stop();
+
+    // Safety: force exit if shutdown hangs
+    const shutdownTimeout = setTimeout(() => {
+      logger.error(`Shutdown timed out after ${LIFECYCLE_TIMEOUTS.SHUTDOWN_TIMEOUT_MS}ms, forcing exit`);
+      process.exit(1);
+    }, LIFECYCLE_TIMEOUTS.SHUTDOWN_TIMEOUT_MS);
+    shutdownTimeout.unref(); // Don't keep process alive just for this timer
+
+    try {
+      await server.stop();
+    } catch (error) {
+      logger.error('Error during shutdown', { error: String(error) });
+    }
+
+    clearTimeout(shutdownTimeout);
     process.exit(0);
   };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
+  // Catch unhandled errors to prevent silent leaks
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception', { error: String(error), stack: error.stack });
+    shutdown();
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled rejection', { reason: String(reason) });
+  });
+
   try {
     await server.start();
+
+    // Periodic memory logging for diagnostics
+    const memLog = setInterval(() => {
+      const m = process.memoryUsage();
+      logger.info('Memory', {
+        heapMB: Math.round(m.heapUsed / 1024 / 1024),
+        rssMB: Math.round(m.rss / 1024 / 1024),
+      });
+    }, LIFECYCLE_TIMEOUTS.MEMORY_LOG_INTERVAL_MS);
+    memLog.unref();
   } catch (error) {
     logger.error('Failed to start server', { error: String(error) });
     process.exit(1);

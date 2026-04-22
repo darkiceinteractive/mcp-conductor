@@ -280,7 +280,17 @@ export class HttpBridge {
       return;
     }
 
-    const body = await this.readBody(req);
+    let body: string;
+    try {
+      body = await this.readBody(req);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('maximum size')) {
+        res.writeHead(413);
+        res.end(JSON.stringify({ error: 'Request body too large' }));
+        return;
+      }
+      throw error;
+    }
     const request = JSON.parse(body) as ToolCallRequest;
 
     if (!request.server || !request.tool) {
@@ -457,13 +467,25 @@ export class HttpBridge {
   /**
    * Read request body
    */
-  private readBody(req: IncomingMessage): Promise<string> {
+  private readBody(req: IncomingMessage, maxBytes: number = 10 * 1024 * 1024): Promise<string> {
     return new Promise((resolve, reject) => {
-      let body = '';
+      const chunks: Buffer[] = [];
+      let totalLength = 0;
+
       req.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
+        totalLength += chunk.length;
+        if (totalLength > maxBytes) {
+          req.destroy();
+          reject(new Error(`Request body exceeds maximum size of ${maxBytes} bytes`));
+          return;
+        }
+        chunks.push(chunk);
       });
-      req.on('end', () => resolve(body));
+
+      req.on('end', () => {
+        resolve(Buffer.concat(chunks).toString('utf-8'));
+      });
+
       req.on('error', reject);
     });
   }

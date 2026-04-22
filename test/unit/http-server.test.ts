@@ -223,6 +223,37 @@ describe('HttpBridge', () => {
         });
         expect(response.status).toBe(204);
       });
+
+      it('should reject request bodies exceeding the 10MB limit with 413', async () => {
+        // readBody defaults to 10MB. Build an 11MB payload.
+        const huge = 'x'.repeat(11 * 1024 * 1024);
+        const body = JSON.stringify({ server: 'echo', tool: 'reverse', params: { big: huge } });
+
+        let response: Response | null = null;
+        let networkError: unknown = null;
+        try {
+          response = await fetch(`http://localhost:${TEST_PORT}/call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+          });
+        } catch (err) {
+          // The server may destroy the socket before the client finishes
+          // streaming the body; that's an acceptable outcome for this limit.
+          networkError = err;
+        }
+
+        if (response) {
+          // Preferred path: server responded with 413 before destroying the socket.
+          expect(response.status).toBe(413);
+          const data = await response.json();
+          expect(data.error).toMatch(/too large/i);
+        } else {
+          // Acceptable fallback: the client saw a transport-level error
+          // because req.destroy() closed the socket mid-send.
+          expect(networkError).toBeTruthy();
+        }
+      }, 15000);
     });
   });
 

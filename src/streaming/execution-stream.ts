@@ -8,6 +8,7 @@
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
 import { logger } from '../utils/index.js';
+import { LIFECYCLE_TIMEOUTS } from '../config/defaults.js';
 
 export interface StreamEvent {
   type: 'log' | 'progress' | 'tool_call' | 'error' | 'complete';
@@ -124,6 +125,10 @@ export class ExecutionStream extends EventEmitter {
    */
   log(message: string, level: 'info' | 'warn' | 'error' | 'debug' = 'info'): void {
     this.state.logs.push(message);
+    // Cap logs to prevent unbounded memory growth
+    if (this.state.logs.length > 500) {
+      this.state.logs = this.state.logs.slice(-500);
+    }
     this.state.lastUpdate = new Date();
 
     const event: StreamEvent = {
@@ -206,6 +211,8 @@ export class ExecutionStream extends EventEmitter {
     this.state.status = result.success ? 'completed' : 'error';
     this.state.progress = 100;
     this.state.lastUpdate = new Date();
+    // Release log memory on completion
+    this.state.logs = [];
 
     const event: StreamEvent = {
       type: 'complete',
@@ -294,11 +301,14 @@ export class ExecutionStream extends EventEmitter {
 export class StreamManager {
   private streams: Map<string, ExecutionStream> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
-  private maxStreamAge = 5 * 60 * 1000; // 5 minutes
+  private maxStreamAge = LIFECYCLE_TIMEOUTS.STREAM_STALE_TTL_MS;
 
   constructor() {
     // Start cleanup interval
-    this.cleanupInterval = setInterval(() => this.cleanupStaleStreams(), 60000);
+    this.cleanupInterval = setInterval(
+      () => this.cleanupStaleStreams(),
+      LIFECYCLE_TIMEOUTS.STREAM_CLEANUP_INTERVAL_MS,
+    );
   }
 
   /**
@@ -365,12 +375,23 @@ export class StreamManager {
       const state = stream.getState();
       const age = now - state.lastUpdate.getTime();
 
-      // Remove if completed and older than max age, or if no connections and stale
+      // Normal cleanup: completed + no connections + 5min old
       if (
         (state.status === 'completed' || state.status === 'error') &&
         !stream.hasConnections() &&
         age > this.maxStreamAge
       ) {
+        toRemove.push(id);
+      }
+      // Force cleanup: completed/error + STREAM_COMPLETED_TTL_MS old (even with connections)
+      else if (
+        (state.status === 'completed' || state.status === 'error') &&
+        age > LIFECYCLE_TIMEOUTS.STREAM_COMPLETED_TTL_MS
+      ) {
+        toRemove.push(id);
+      }
+      // Stuck cleanup: running + no update in STREAM_STUCK_TTL_MS
+      else if (state.status === 'running' && age > LIFECYCLE_TIMEOUTS.STREAM_STUCK_TTL_MS) {
         toRemove.push(id);
       }
     }
@@ -393,8 +414,9 @@ export class StreamManager {
       this.cleanupInterval = null;
     }
 
-    // Close all streams
-    for (const [id, stream] of this.streams) {
+    // Close all streams and clean up listeners
+    for (const [_id, stream] of this.streams) {
+      stream.removeAllListeners();
       stream.closeAllConnections();
     }
     this.streams.clear();

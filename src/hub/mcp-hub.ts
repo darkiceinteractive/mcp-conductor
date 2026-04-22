@@ -13,7 +13,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { EventEmitter } from 'node:events';
-import { logger, RateLimiter } from '../utils/index.js';
+import { logger, RateLimiter, minimalChildEnv } from '../utils/index.js';
 import {
   loadClaudeConfig,
   findClaudeConfig,
@@ -79,6 +79,7 @@ export class MCPHub extends EventEmitter {
   private connections: Map<string, ServerConnection> = new Map();
   private toolCache: Map<string, Tool[]> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
+  private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private isShuttingDown = false;
 
   constructor(config: HubConfig = {}) {
@@ -221,6 +222,21 @@ export class MCPHub extends EventEmitter {
       return false;
     }
 
+    // Clean up existing connection before creating new one
+    const existing = this.connections.get(name);
+    if (existing && existing.status !== 'disconnected') {
+      try {
+        if (existing.transport) {
+          existing.transport.onerror = undefined;
+          existing.transport.onclose = undefined;
+        }
+        if (existing.rateLimiter) existing.rateLimiter.destroy();
+        await existing.client.close();
+      } catch {
+        // Ignore cleanup errors during reconnect
+      }
+    }
+
     try {
       logger.debug(`Connecting to server: ${name}`, {
         command: serverConfig.command,
@@ -233,18 +249,11 @@ export class MCPHub extends EventEmitter {
       });
 
       // Build env with defined values only
-      let transportEnv: Record<string, string> | undefined;
-      if (serverConfig.env) {
-        transportEnv = {};
-        // Copy process.env, filtering out undefined values
-        for (const [key, value] of Object.entries(process.env)) {
-          if (value !== undefined) {
-            transportEnv[key] = value;
-          }
-        }
-        // Override with server-specific env
-        Object.assign(transportEnv, serverConfig.env);
-      }
+      // Only pass PATH + HOME + server-specific env (not full process.env)
+      const transportEnv =
+        serverConfig.env && Object.keys(serverConfig.env).length > 0
+          ? minimalChildEnv(serverConfig.env)
+          : undefined;
 
       const transport = new StdioClientTransport({
         command: serverConfig.command,
@@ -360,7 +369,12 @@ export class MCPHub extends EventEmitter {
       delayMs: this.config.reconnectDelayMs,
     });
 
-    setTimeout(async () => {
+    // Clear any existing timer for this server
+    const existingTimer = this.reconnectTimers.get(name);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+      this.reconnectTimers.delete(name);
       if (this.isShuttingDown) return;
 
       logger.info(`Attempting reconnect for ${name}`, { attempt: attempts });
@@ -370,6 +384,8 @@ export class MCPHub extends EventEmitter {
         env: connection.env,
       });
     }, this.config.reconnectDelayMs);
+
+    this.reconnectTimers.set(name, timer);
   }
 
   /**
@@ -400,9 +416,22 @@ export class MCPHub extends EventEmitter {
    * Disconnect from a specific server
    */
   async disconnectServer(name: string): Promise<void> {
+    // Clear any pending reconnect timer
+    const timer = this.reconnectTimers.get(name);
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(name);
+    }
+
     const connection = this.connections.get(name);
     if (!connection) {
       return;
+    }
+
+    // Clean up transport event handlers
+    if (connection.transport) {
+      connection.transport.onerror = undefined;
+      connection.transport.onclose = undefined;
     }
 
     // Clean up rate limiter
@@ -497,6 +526,12 @@ export class MCPHub extends EventEmitter {
     logger.info('Shutting down MCP Hub');
     this.isShuttingDown = true;
 
+    // Clear all pending reconnection timers
+    for (const [_name, timer] of this.reconnectTimers) {
+      clearTimeout(timer);
+    }
+    this.reconnectTimers.clear();
+
     const disconnectPromises = Array.from(this.connections.keys()).map((name) =>
       this.disconnectServer(name)
     );
@@ -505,6 +540,9 @@ export class MCPHub extends EventEmitter {
 
     this.connections.clear();
     this.toolCache.clear();
+
+    // Clean up EventEmitter listeners
+    this.removeAllListeners();
 
     logger.info('MCP Hub shutdown complete');
   }
