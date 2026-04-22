@@ -1,0 +1,105 @@
+# MCP Conductor Scale Benchmark Results
+
+**Generated:** 2026-03-08T08:57:29.002Z  
+**Methodology:** See [docs/benchmarks/methodology.md](methodology.md)
+
+## Summary
+
+| Scale | Tool Calls | Data | Avg Compression | Avg Tokens Saved | Sonnet $/session |
+|-------|-----------|------|-----------------|-----------------|-----------------|
+| Small (Solo Dev) | 1–5 | 5–15 KB | **88.8%** | ~916 | ~$0.003 |
+| Medium (Active Team) | 5–25 | 15–100 KB | **95.6%** | ~6.2K | ~$0.019 |
+| Large (Engineering Org) | 25–100 | 100–500 KB | **98.9%** | ~31.7K | ~$0.095 |
+| Enterprise (CI/CD Automation) | 100–500 | 500–2048 KB | **99.4%** | ~156.3K | ~$0.469 |
+
+**Overall:** avg 95.7% compression, range 86.4%–99.5%
+
+## Scenario Detail
+
+### Small (Solo Dev)
+
+_Solo developer, occasional MCP use. 1–5 tool calls, 5–15 KB total data._
+
+| Scenario | Tool Calls | Data | Passthrough | Execution | Saved | Compression | Sonnet/session |
+|----------|-----------|------|------------|-----------|-------|-------------|---------------|
+| github-issues-fetch | 1 | 3 KB | 1.0K | 139 | 886 | **86.4%** | $0.003 |
+| filesystem-dir-listing | 1 | 4 KB | 1.3K | 87 | 1.2K | **93.2%** | $0.004 |
+| brave-search-single | 1 | 2 KB | 775 | 102 | 673 | **86.8%** | $0.002 |
+
+### Medium (Active Team)
+
+_Active dev team, daily use. 5–25 tool calls, 15–100 KB total data._
+
+| Scenario | Tool Calls | Data | Passthrough | Execution | Saved | Compression | Sonnet/session |
+|----------|-----------|------|------------|-----------|-------|-------------|---------------|
+| sprint-dashboard | 3 | 18 KB | 5.0K | 191 | 4.8K | **96.1%** | $0.014 |
+| codebase-scan | 8 | 41 KB | 11.7K | 238 | 11.5K | **98.0%** | $0.034 |
+| parallel-web-research | 3 | 8 KB | 2.6K | 188 | 2.4K | **92.7%** | $0.007 |
+
+### Large (Engineering Org)
+
+_Engineering org, automated workflows. 25–100 tool calls, 100–500 KB total data._
+
+| Scenario | Tool Calls | Data | Passthrough | Execution | Saved | Compression | Sonnet/session |
+|----------|-----------|------|------------|-----------|-------|-------------|---------------|
+| issue-triage-filetree | 12 | 109 KB | 29.8K | 334 | 29.5K | **98.9%** | $0.088 |
+| multi-repo-analysis | 25 | 145 KB | 40.8K | 410 | 40.3K | **99.0%** | $0.121 |
+| parallel-search-github | 22 | 88 KB | 25.7K | 329 | 25.4K | **98.7%** | $0.076 |
+
+### Enterprise (CI/CD Automation)
+
+_CI/CD automation, high volume. 100+ tool calls, 500 KB–2 MB total data._
+
+| Scenario | Tool Calls | Data | Passthrough | Execution | Saved | Compression | Sonnet/session |
+|----------|-----------|------|------------|-----------|-------|-------------|---------------|
+| backlog-scan-500 | 52 | 375 KB | 103.8K | 694 | 103.1K | **99.3%** | $0.309 |
+| dependency-audit-monorepo | 64 | 549 KB | 150.1K | 899 | 149.2K | **99.4%** | $0.448 |
+| daily-digest-5-repos | 85 | 800 KB | 217.6K | 1.1K | 216.5K | **99.5%** | $0.649 |
+
+## Formula
+
+```
+passthroughTokens = (toolCalls × 150) + (dataBytes / 1024 × 256)
+executionTokens   = ceil(codeChars / 3.5) + ceil(resultJson.length / 3.8)
+compressionPct    = (passthroughTokens − executionTokens) / passthroughTokens × 100
+```
+
+## Pricing Used
+
+| Model | Input $/M tokens |
+|-------|-----------------|
+| Claude Haiku 4.5 | $0.80 |
+| Claude Sonnet 4.6 | $3.00 |
+| Claude Opus 4.6 | $15.00 |
+
+---
+
+## Section 2 — Workflow Benchmarks
+
+_Compression across 7 developer workflow categories (quick + deep variants)._
+
+| Workflow | Quick | Deep | Avg Compression | Tokens Saved (deep) | Sonnet/session |
+|----------|-------|------|-----------------|--------------------:|---------------|
+| Morning Standup | 97.0% | 97.6% | **97.3%** | ~8.7K | $0.026 |
+| Code Review | 97.7% | 98.3% | **98.0%** | ~17.8K | $0.053 |
+| Bug Investigation | 97.1% | 97.6% | **97.3%** | ~12.4K | $0.037 |
+| Dependency Check | 97.0% | 97.6% | **97.3%** | ~9.6K | $0.029 |
+| Research Synthesis | 93.3% | 93.5% | **93.4%** | ~3.6K | $0.011 |
+| Project Context Load | 98.1% | 98.5% | **98.3%** | ~20.8K | $0.062 |
+| Release Prep | 97.8% | 98.2% | **98.0%** | ~13.9K | $0.042 |
+
+**Overall workflow average:** 97.1% compression across all 14 scenarios
+
+
+---
+
+## Section 3 — Claude Desktop Context Window
+
+_Context-window usage and monthly savings across three daily-use profiles._  
+_"Sessions/200K" = how many sessions worth of workflow data fit before the 200K context fills._
+
+| Session Profile | Passthrough | Execution | Compression | Sessions/200K | Monthly Saving |
+|-----------------|------------|-----------|-------------|:-------------:|----------------|
+| Light User (3 workflows) | ~39.7K | ~832 | **97.9%** | 5  →  240 | ~$11/month |
+| Power User (8 workflows) | ~106.9K | ~2.2K | **97.9%** | 1  →  90 | ~$57/month |
+| Heavy Automation (20 workflows) | ~251.9K | ~5.5K | **97.8%** | 0  →  36 | ~$266/month |

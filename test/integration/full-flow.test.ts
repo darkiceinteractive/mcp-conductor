@@ -19,7 +19,10 @@ describe('Full Flow Integration', () => {
 
   const bridgeConfig: BridgeConfig = {
     port: BRIDGE_PORT,
-    host: 'localhost',
+    // Bind explicitly to IPv4 127.0.0.1 — on some Linux CI images `localhost`
+    // resolves to ::1 (IPv6), but Deno's fetch-from-sandbox uses IPv4 first,
+    // which causes ECONNREFUSED despite both being "localhost".
+    host: '127.0.0.1',
   };
 
   const sandboxConfig: SandboxConfig = {
@@ -135,7 +138,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: ['echo'],
       });
 
@@ -158,7 +161,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: ['math'],
       });
 
@@ -180,7 +183,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: ['echo'],
       });
 
@@ -204,7 +207,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: ['math'],
       });
 
@@ -232,7 +235,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: [],
       });
 
@@ -266,7 +269,7 @@ describe('Full Flow Integration', () => {
 
       const result = await executor.execute(code, {
         timeoutMs: 10000,
-        bridgeUrl: `http://localhost:${BRIDGE_PORT}`,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
         servers: ['echo', 'math'],
       });
 
@@ -287,7 +290,7 @@ describe('Full Flow Integration', () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:${BRIDGE_PORT}/health`);
+      const response = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/health`);
       expect(response.ok).toBe(true);
 
       const data = await response.json();
@@ -301,7 +304,7 @@ describe('Full Flow Integration', () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:${BRIDGE_PORT}/servers/math/tools`);
+      const response = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/servers/math/tools`);
       expect(response.ok).toBe(true);
 
       const data = await response.json();
@@ -315,7 +318,7 @@ describe('Full Flow Integration', () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:${BRIDGE_PORT}/search?q=multiply`);
+      const response = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/search?q=multiply`);
       expect(response.ok).toBe(true);
 
       const data = await response.json();

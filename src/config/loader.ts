@@ -177,6 +177,9 @@ export function getClaudeConfigPaths(): string[] {
 
 /**
  * Find the Claude config file
+ *
+ * Prefers files that contain an `mcpServers` key. If none do, falls back
+ * to the first existing file in the search order.
  */
 export function findClaudeConfig(): string | null {
   // Check environment variable first
@@ -185,15 +188,33 @@ export function findClaudeConfig(): string | null {
     return envPath;
   }
 
-  // Search standard paths
-  for (const path of getClaudeConfigPaths()) {
-    if (existsSync(path)) {
-      logger.debug(`Found Claude config at ${path}`);
-      return path;
+  // Search standard paths — prefer files with mcpServers
+  let firstExisting: string | null = null;
+
+  for (const configPath of getClaudeConfigPaths()) {
+    if (!existsSync(configPath)) continue;
+
+    if (!firstExisting) {
+      firstExisting = configPath;
+    }
+
+    try {
+      const content = readFileSync(configPath, 'utf-8');
+      const parsed = safeJsonParse<Record<string, unknown>>(content, {});
+      if (parsed.mcpServers && Object.keys(parsed.mcpServers as Record<string, unknown>).length > 0) {
+        logger.debug(`Found Claude config with mcpServers at ${configPath}`);
+        return configPath;
+      }
+    } catch {
+      // Skip unreadable files
     }
   }
 
-  return null;
+  if (firstExisting) {
+    logger.debug(`Found Claude config at ${firstExisting} (no mcpServers found in any config)`);
+  }
+
+  return firstExisting;
 }
 
 /**

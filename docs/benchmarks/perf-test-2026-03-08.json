@@ -1,0 +1,250 @@
+{
+  "meta": {
+    "run_id": "perf-2026-03-08T08:57",
+    "run_timestamp": "2026-03-08T08:57:27Z",
+    "run_date": "2026-03-08",
+    "package": "@darkiceinteractive/mcp-conductor",
+    "version": "1.0.1",
+    "note": "Run this test again every 24/48/72h. Compare run_id entries across files to track longitudinal usage trends.",
+    "comparison_fields": ["test_suite", "live_session_metrics", "scale_benchmarks", "workflow_benchmarks", "mode_comparisons"]
+  },
+  "test_suite": {
+    "total": 675,
+    "passed": 674,
+    "failed": 0,
+    "skipped": 1,
+    "files": 26,
+    "duration_ms": 7050,
+    "result": "PASS"
+  },
+  "live_session_metrics": {
+    "session_id": "session_1772960247788_brhdi4",
+    "uptime_ms": 77992,
+    "total_executions": 6,
+    "successful": 6,
+    "failed": 0,
+    "total_tokens_saved": 635395,
+    "average_tokens_saved": 105899,
+    "average_savings_percent": 56,
+    "total_data_processed_bytes": 2539549,
+    "total_data_processed_mb": 2.42,
+    "total_result_bytes": 1308,
+    "compression_ratio_overall": 99.95,
+    "performance": {
+      "average_duration_ms": 129,
+      "min_duration_ms": 1,
+      "max_duration_ms": 494
+    },
+    "mode_breakdown": {
+      "execution_calls": 5,
+      "passthrough_calls": 1
+    }
+  },
+  "live_tests": [
+    {
+      "id": "T1",
+      "name": "Small Payload — Directory Listing",
+      "mode": "execution",
+      "tool_calls": 1,
+      "raw_bytes": 221,
+      "result_bytes": 144,
+      "tokens_saved": 17,
+      "savings_percent": 8,
+      "execution_ms": 169,
+      "notes": "Small payloads still benefit from execution mode; savings grow with data size"
+    },
+    {
+      "id": "T2",
+      "name": "Medium Payload — 5 Source Files",
+      "mode": "execution",
+      "tool_calls": 5,
+      "raw_bytes": 54046,
+      "result_bytes": 392,
+      "tokens_saved": 13888,
+      "savings_percent": 97,
+      "execution_ms": 44,
+      "notes": "97% savings on 54KB of source files — typical developer workflow"
+    },
+    {
+      "id": "T3",
+      "name": "Large Payload — Directory Tree + Search",
+      "mode": "execution",
+      "tool_calls": 2,
+      "raw_bytes": 2481799,
+      "result_bytes": 161,
+      "tokens_saved": 620470,
+      "savings_percent": 100,
+      "execution_ms": 494,
+      "notes": "2.48MB raw data → 161 bytes result. 620,470 tokens saved in a single call"
+    },
+    {
+      "id": "T4",
+      "name": "Concurrent — 4 Parallel Tool Calls",
+      "mode": "execution",
+      "tool_calls": 4,
+      "raw_bytes": 622,
+      "result_bytes": 268,
+      "tokens_saved": 421,
+      "savings_percent": 56,
+      "execution_ms": 35,
+      "per_call_avg_ms": 1,
+      "notes": "4 concurrent calls resolved in 35ms total via Promise.all"
+    },
+    {
+      "id": "T5",
+      "name": "Cross-Server — package.json Read",
+      "mode": "execution",
+      "tool_calls": 1,
+      "raw_bytes": 2640,
+      "result_bytes": 122,
+      "tokens_saved": 599,
+      "savings_percent": 74,
+      "execution_ms": 32,
+      "notes": "Cross-server call with JSON parsing in sandbox"
+    },
+    {
+      "id": "T6",
+      "name": "Sandbox Computation — 10K Record Aggregation",
+      "mode": "execution",
+      "tool_calls": 0,
+      "raw_bytes": 920569,
+      "result_bytes": 372,
+      "compression_ratio": 100,
+      "execution_ms": 10,
+      "notes": "Pure sandbox computation: 920KB of data → 372B result in 10ms"
+    },
+    {
+      "id": "T7",
+      "name": "Passthrough Baseline — Directory Listing",
+      "mode": "passthrough",
+      "tool_calls": 1,
+      "execution_ms": 1,
+      "tokens_saved": 0,
+      "savings_percent": 0,
+      "notes": "Baseline: passthrough returns full raw result to context"
+    }
+  ],
+  "mode_comparisons": [
+    {
+      "scenario": "Multi-file project analysis (12 calls, 150KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 39900,
+      "savings_percent": 99.6
+    },
+    {
+      "scenario": "Large codebase analysis (55 calls, 500KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 136000,
+      "savings_percent": 99.9
+    },
+    {
+      "scenario": "CI/CD pipeline (105 calls, 2048KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 533000,
+      "savings_percent": 99.97
+    },
+    {
+      "scenario": "Morning code review (45 calls, 200KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 59000,
+      "savings_percent": 99.7
+    },
+    {
+      "scenario": "npm package comparison (20 calls, 80KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 24000,
+      "savings_percent": 99.0
+    },
+    {
+      "scenario": "Single ping/status call (1 call, 0.1KB)",
+      "execution_tokens": 150,
+      "passthrough_tokens": 225,
+      "savings_percent": 33.0
+    }
+  ],
+  "scale_benchmarks": [
+    {
+      "scale": "Small (Solo Dev)",
+      "calls_range": "1–5",
+      "data_range_kb": "5–15",
+      "compression_percent": 88.8,
+      "tokens_saved": 916,
+      "sonnet_cost_per_session_usd": 0.003
+    },
+    {
+      "scale": "Medium (Active Team)",
+      "calls_range": "5–25",
+      "data_range_kb": "15–100",
+      "compression_percent": 95.6,
+      "tokens_saved": 6200,
+      "sonnet_cost_per_session_usd": 0.019
+    },
+    {
+      "scale": "Large (Engineering Org)",
+      "calls_range": "25–100",
+      "data_range_kb": "100–500",
+      "compression_percent": 98.9,
+      "tokens_saved": 31700,
+      "sonnet_cost_per_session_usd": 0.095
+    },
+    {
+      "scale": "Enterprise (CI/CD)",
+      "calls_range": "100–500",
+      "data_range_kb": "500–2048",
+      "compression_percent": 99.4,
+      "tokens_saved": 156300,
+      "sonnet_cost_per_session_usd": 0.469
+    }
+  ],
+  "scale_summary": {
+    "average_compression_percent": 95.67,
+    "min_compression_percent": 86.44,
+    "max_compression_percent": 99.5
+  },
+  "workflow_benchmarks": [
+    { "workflow": "Morning Standup",    "quick_pct": 97.0, "deep_pct": 97.6, "avg_pct": 97.3, "tokens_saved_deep": 8700,  "sonnet_cost_usd": 0.026 },
+    { "workflow": "Code Review",        "quick_pct": 97.7, "deep_pct": 98.3, "avg_pct": 98.0, "tokens_saved_deep": 17800, "sonnet_cost_usd": 0.053 },
+    { "workflow": "Bug Investigation",  "quick_pct": 97.1, "deep_pct": 97.6, "avg_pct": 97.3, "tokens_saved_deep": 12400, "sonnet_cost_usd": 0.037 },
+    { "workflow": "Dependency Check",   "quick_pct": 97.0, "deep_pct": 97.6, "avg_pct": 97.3, "tokens_saved_deep": 9600,  "sonnet_cost_usd": 0.029 },
+    { "workflow": "Research Synthesis", "quick_pct": 93.3, "deep_pct": 93.5, "avg_pct": 93.4, "tokens_saved_deep": 3600,  "sonnet_cost_usd": 0.011 },
+    { "workflow": "Project Context",    "quick_pct": 98.1, "deep_pct": 98.5, "avg_pct": 98.3, "tokens_saved_deep": 20800, "sonnet_cost_usd": 0.062 },
+    { "workflow": "Release Prep",       "quick_pct": 97.8, "deep_pct": 98.2, "avg_pct": 98.0, "tokens_saved_deep": 13900, "sonnet_cost_usd": 0.042 }
+  ],
+  "workflow_summary": {
+    "average_compression_percent": 97.1,
+    "total_scenarios": 14
+  },
+  "claude_desktop_sessions": [
+    {
+      "profile": "Light User",
+      "workflows_per_session": 3,
+      "passthrough_tokens": 39700,
+      "execution_tokens": 832,
+      "compression_percent": 97.9,
+      "sessions_per_200k_passthrough": 5,
+      "sessions_per_200k_execution": 240,
+      "monthly_savings_usd": 11
+    },
+    {
+      "profile": "Power User",
+      "workflows_per_session": 8,
+      "passthrough_tokens": 106900,
+      "execution_tokens": 2200,
+      "compression_percent": 97.9,
+      "sessions_per_200k_passthrough": 1,
+      "sessions_per_200k_execution": 90,
+      "monthly_savings_usd": 57
+    },
+    {
+      "profile": "Heavy Automation",
+      "workflows_per_session": 20,
+      "passthrough_tokens": 251900,
+      "execution_tokens": 5500,
+      "compression_percent": 97.8,
+      "sessions_per_200k_passthrough": 0,
+      "sessions_per_200k_execution": 36,
+      "monthly_savings_usd": 266,
+      "note": "Passthrough overflows 200K context window — impossible without conductor"
+    }
+  ]
+}

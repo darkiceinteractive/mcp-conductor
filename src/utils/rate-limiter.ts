@@ -159,6 +159,15 @@ export class RateLimiter extends EventEmitter {
    * Enqueue a request to wait for a token
    */
   private enqueue(): Promise<void> {
+    // Reject if queue is full to prevent unbounded memory growth
+    if (this.queue.length >= 100) {
+      this.totalRejected++;
+      this.emit('rejected', { serverName: this.serverName, reason: 'queue full' });
+      return Promise.reject(
+        new Error(`Rate limit queue full for ${this.serverName}: ${this.queue.length} pending`)
+      );
+    }
+
     return new Promise((resolve, reject) => {
       const queuePosition = this.queue.length + 1;
       const estimatedWaitMs = Math.ceil((queuePosition / this.requestsPerSecond) * 1000);

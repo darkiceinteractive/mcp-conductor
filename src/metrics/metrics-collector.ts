@@ -116,7 +116,7 @@ export class MetricsCollector extends EventEmitter {
   private sessionId: string;
   private sessionStart: Date;
   private executions: ExecutionMetrics[] = [];
-  private maxStoredExecutions = 1000;
+  private maxStoredExecutions = 100;
   private logPath: string | null = null;
 
   constructor(config: MetricsConfig, estimationConfig?: Partial<TokenEstimationConfig>) {

@@ -14,6 +14,10 @@ import { MCPHub } from '../hub/index.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
 import { MetricsCollector } from '../metrics/index.js';
+import { shutdownStreamManager } from '../streaming/index.js';
+import { shutdownMetricsCollector } from '../metrics/index.js';
+import { shutdownModeHandler } from '../modes/index.js';
+import { shutdownSkillsEngine } from '../skills/index.js';
 import type { MCPExecutorConfig, ExecutionMode, ConductorConfig } from '../config/index.js';
 import { loadConductorConfig, saveConductorConfig, getDefaultConductorConfigPath } from '../config/index.js';
 
@@ -1266,6 +1270,56 @@ Triggers a reload to apply changes immediately.`,
         }
       }
     );
+
+    // Register get_memory_stats tool for runtime diagnostics
+    this.server.registerTool(
+      'get_memory_stats',
+      {
+        title: 'Get Memory Stats',
+        description: 'Returns live memory usage and resource counts for the conductor process. Use this to diagnose memory issues.',
+        inputSchema: {},
+        outputSchema: {
+          heap_used_mb: z.number(),
+          heap_total_mb: z.number(),
+          rss_mb: z.number(),
+          external_mb: z.number(),
+          array_buffers_mb: z.number(),
+          active_deno_processes: z.number(),
+          connected_servers: z.object({
+            total: z.number(),
+            connected: z.number(),
+            error: z.number(),
+            disconnected: z.number(),
+          }),
+          active_streams: z.number(),
+          uptime_seconds: z.number(),
+        },
+      },
+      async () => {
+        const mem = process.memoryUsage();
+        const toMB = (bytes: number) => Math.round(bytes / 1024 / 1024 * 100) / 100;
+
+        const { getStreamManager } = await import('../streaming/index.js');
+        const streamManager = getStreamManager();
+
+        const output = {
+          heap_used_mb: toMB(mem.heapUsed),
+          heap_total_mb: toMB(mem.heapTotal),
+          rss_mb: toMB(mem.rss),
+          external_mb: toMB(mem.external),
+          array_buffers_mb: toMB(mem.arrayBuffers),
+          active_deno_processes: this.executor.getActiveProcessCount(),
+          connected_servers: this.hub.getStats(),
+          active_streams: streamManager.getStreamCount(),
+          uptime_seconds: Math.round(process.uptime()),
+        };
+
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }],
+          structuredContent: output,
+        };
+      }
+    );
   }
 
   /**
@@ -1392,12 +1446,25 @@ Triggers a reload to apply changes immediately.`,
    * Stop the server
    */
   async stop(): Promise<void> {
-    // Shutdown hub connections
+    logger.info('Stopping MCP Executor server...');
+
+    // 1. Kill all in-flight Deno processes first
+    await this.executor.shutdown();
+
+    // 2. Shutdown hub connections (disconnects backend MCP servers)
     if (!this.useMockServers) {
       await this.hub.shutdown();
     }
 
+    // 3. Shutdown global singletons (intervals, listeners, caches)
+    shutdownStreamManager();
+    shutdownMetricsCollector();
+    shutdownModeHandler();
+    shutdownSkillsEngine();
+
+    // 4. Stop HTTP bridge last (Deno processes may still be calling it during cleanup)
     await this.bridge.stop();
+
     logger.info('MCP Executor server stopped');
   }
 

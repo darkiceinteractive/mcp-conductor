@@ -19,6 +19,8 @@ export interface ExecutionConfig {
 export interface SandboxConfig {
   maxMemoryMb: number;
   allowedNetHosts: string[];
+  maxConcurrentProcesses?: number;
+  maxOutputBytes?: number;
 }
 
 export interface SkillsConfig {

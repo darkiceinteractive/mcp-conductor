@@ -30,8 +30,10 @@ export const DEFAULT_CONFIG: MCPExecutorConfig = {
     streamingEnabled: true,
   },
   sandbox: {
-    maxMemoryMb: 512,
+    maxMemoryMb: 128,
     allowedNetHosts: ['localhost'],
+    maxConcurrentProcesses: 5,
+    maxOutputBytes: 10 * 1024 * 1024, // 10MB
   },
   skills: {
     path: null,
@@ -86,3 +88,26 @@ export const DEFAULT_CONDUCTOR_CONFIG = {
   exclusive: true,
   servers: {},
 };
+
+/**
+ * Lifecycle timeouts (milliseconds).
+ *
+ * Grouped together so memory-leak diagnostics and load testing can adjust
+ * them centrally without hunting through the source tree. Consumers:
+ * - `SHUTDOWN_TIMEOUT_MS` — `src/index.ts` SIGINT/SIGTERM handler
+ * - `PROCESS_FORCE_KILL_MS` — `DenoExecutor.shutdown()` SIGTERM → SIGKILL grace
+ * - `STREAM_STALE_TTL_MS` — `StreamManager` normal cleanup (completed, no connections)
+ * - `STREAM_COMPLETED_TTL_MS` — `StreamManager` force cleanup (completed, any connections)
+ * - `STREAM_STUCK_TTL_MS` — `StreamManager` cleanup for hung running streams
+ * - `STREAM_CLEANUP_INTERVAL_MS` — `StreamManager` tick rate for the sweep
+ * - `MEMORY_LOG_INTERVAL_MS` — periodic heap/RSS log from the main entry point
+ */
+export const LIFECYCLE_TIMEOUTS = {
+  SHUTDOWN_TIMEOUT_MS: 10_000,
+  PROCESS_FORCE_KILL_MS: 3_000,
+  STREAM_STALE_TTL_MS: 5 * 60_000,
+  STREAM_COMPLETED_TTL_MS: 10 * 60_000,
+  STREAM_STUCK_TTL_MS: 15 * 60_000,
+  STREAM_CLEANUP_INTERVAL_MS: 60_000,
+  MEMORY_LOG_INTERVAL_MS: 60_000,
+} as const;

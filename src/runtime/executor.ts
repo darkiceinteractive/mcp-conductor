@@ -5,11 +5,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { logger, generateExecutionId, TimeoutError, RuntimeError, SyntaxError } from '../utils/index.js';
+import { logger, generateExecutionId, TimeoutError, RuntimeError, SyntaxError, minimalChildEnv } from '../utils/index.js';
 import type { SandboxConfig } from '../config/index.js';
+import { LIFECYCLE_TIMEOUTS } from '../config/defaults.js';
 
 export interface ExecutionResult {
   /** Unique execution ID for tracking and streaming */
@@ -474,26 +475,130 @@ async function __execute() {
 export class DenoExecutor {
   private config: SandboxConfig;
   private tempDir: string;
+  private activeProcesses: Map<string, ChildProcess> = new Map();
+  private maxConcurrentProcesses: number;
+  private maxOutputBytes: number;
+  private isShuttingDown = false;
+  private denoAvailable: boolean | null = null;
 
   constructor(config: SandboxConfig) {
     this.config = config;
+    this.maxConcurrentProcesses = config.maxConcurrentProcesses ?? 5;
+    this.maxOutputBytes = config.maxOutputBytes ?? 10 * 1024 * 1024;
     this.tempDir = join(tmpdir(), 'mcp-executor');
 
     // Ensure temp directory exists
     if (!existsSync(this.tempDir)) {
       mkdirSync(this.tempDir, { recursive: true });
     }
+
+    // Clean up stale temp files from previous crashes
+    this.cleanupStaleTempFiles();
   }
 
   /**
-   * Check if Deno is available
+   * Remove leftover temp files from previous executions that survived crashes.
+   *
+   * Only files older than `STALE_TEMP_FILE_TTL_MS` are removed. Deleting
+   * every `exec_*.ts` unconditionally would race with peer executors running
+   * in parallel (Vitest worker pool, or multiple conductor instances sharing
+   * `/tmp/mcp-executor`) and yank a temp file out from under an in-flight
+   * `deno run`.
+   */
+  private cleanupStaleTempFiles(): void {
+    const STALE_TEMP_FILE_TTL_MS = 60_000;
+    const now = Date.now();
+    try {
+      const files = readdirSync(this.tempDir)
+        .filter(f => f.startsWith('exec_') && f.endsWith('.ts'));
+      let removed = 0;
+      for (const f of files) {
+        const path = join(this.tempDir, f);
+        try {
+          const { mtimeMs } = statSync(path);
+          if (now - mtimeMs > STALE_TEMP_FILE_TTL_MS) {
+            unlinkSync(path);
+            removed++;
+          }
+        } catch {
+          // Ignore individual file stat/unlink failures
+        }
+      }
+      if (removed > 0) {
+        logger.debug(`Cleaned up ${removed} stale temp files`);
+      }
+    } catch {
+      // Ignore errors reading temp directory
+    }
+  }
+
+  /**
+   * Check if Deno is available (cached after first successful check)
    */
   async checkDeno(): Promise<boolean> {
+    if (this.denoAvailable !== null) return this.denoAvailable;
+
     return new Promise((resolve) => {
       const proc = spawn('deno', ['--version'], { stdio: 'pipe' });
-      proc.on('close', (code) => resolve(code === 0));
-      proc.on('error', () => resolve(false));
+      proc.on('close', (code) => {
+        this.denoAvailable = code === 0;
+        resolve(this.denoAvailable);
+      });
+      proc.on('error', () => {
+        this.denoAvailable = false;
+        resolve(false);
+      });
     });
+  }
+
+  /**
+   * Shutdown executor: kill all active Deno processes
+   */
+  async shutdown(): Promise<void> {
+    this.isShuttingDown = true;
+
+    if (this.activeProcesses.size === 0) return;
+
+    logger.info(`Killing ${this.activeProcesses.size} active Deno processes`);
+
+    const killPromises = Array.from(this.activeProcesses.entries()).map(
+      ([_id, proc]) => {
+        return new Promise<void>((resolve) => {
+          const forceKillTimer = setTimeout(() => {
+            try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+            resolve();
+          }, LIFECYCLE_TIMEOUTS.PROCESS_FORCE_KILL_MS);
+          forceKillTimer.unref();
+
+          proc.on('close', () => {
+            clearTimeout(forceKillTimer);
+            resolve();
+          });
+          proc.on('error', () => {
+            clearTimeout(forceKillTimer);
+            resolve();
+          });
+
+          try {
+            proc.kill('SIGTERM');
+          } catch {
+            clearTimeout(forceKillTimer);
+            resolve();
+          }
+        });
+      }
+    );
+
+    await Promise.allSettled(killPromises);
+    this.activeProcesses.clear();
+    logger.info('All Deno processes terminated');
+  }
+
+  /**
+   * Get count of currently running processes
+   */
+  getActiveProcessCount(): number {
+    return this.activeProcesses.size;
   }
 
   /**
@@ -572,6 +677,33 @@ export class DenoExecutor {
    */
   private runDeno(filePath: string, timeoutMs: number, executionId: string, bridgeUrl: string): Promise<ExecutionResult> {
     return new Promise((resolve) => {
+      // Reject if shutting down
+      if (this.isShuttingDown) {
+        resolve({
+          executionId,
+          success: false,
+          error: { type: 'runtime', message: 'Server is shutting down' },
+          logs: [],
+          metrics: { executionTimeMs: 0, toolCalls: 0, dataProcessedBytes: 0, resultSizeBytes: 0 },
+        });
+        return;
+      }
+
+      // Enforce concurrency limit
+      if (this.activeProcesses.size >= this.maxConcurrentProcesses) {
+        resolve({
+          executionId,
+          success: false,
+          error: {
+            type: 'runtime',
+            message: `Maximum concurrent executions reached (${this.maxConcurrentProcesses}). Try again shortly.`,
+          },
+          logs: [],
+          metrics: { executionTimeMs: 0, toolCalls: 0, dataProcessedBytes: 0, resultSizeBytes: 0 },
+        });
+        return;
+      }
+
       // Extract port from bridge URL
       let bridgePort = 9847; // Default
       try {
@@ -610,17 +742,18 @@ export class DenoExecutor {
 
       logger.debug('Spawning Deno', { executionId, args: args.join(' ') });
 
-      let stdout = '';
-      let stderr = '';
       let killed = false;
 
       const proc: ChildProcess = spawn('deno', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          NO_COLOR: '1', // Disable colour output
-        },
+        env: minimalChildEnv({
+          DENO_DIR: process.env.DENO_DIR,
+          NO_COLOR: '1',
+        }),
       });
+
+      // Track the process
+      this.activeProcesses.set(executionId, proc);
 
       // Set timeout
       const timer = setTimeout(() => {
@@ -628,16 +761,46 @@ export class DenoExecutor {
         proc.kill('SIGKILL');
       }, timeoutMs);
 
+      // Bounded stdout/stderr buffering
+      const stdoutChunks: Buffer[] = [];
+      let stdoutLen = 0;
+      let stdoutTruncated = false;
+      const stderrChunks: Buffer[] = [];
+      let stderrLen = 0;
+      let stderrTruncated = false;
+
       proc.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
+        if (stdoutTruncated) return;
+        if (stdoutLen + data.length > this.maxOutputBytes) {
+          stdoutChunks.push(data.subarray(0, this.maxOutputBytes - stdoutLen));
+          stdoutLen = this.maxOutputBytes;
+          stdoutTruncated = true;
+          logger.warn('stdout truncated at max output limit', { executionId, maxOutputBytes: this.maxOutputBytes });
+        } else {
+          stdoutChunks.push(data);
+          stdoutLen += data.length;
+        }
       });
 
       proc.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
+        if (stderrTruncated) return;
+        if (stderrLen + data.length > this.maxOutputBytes) {
+          stderrChunks.push(data.subarray(0, this.maxOutputBytes - stderrLen));
+          stderrLen = this.maxOutputBytes;
+          stderrTruncated = true;
+          logger.warn('stderr truncated at max output limit', { executionId, maxOutputBytes: this.maxOutputBytes });
+        } else {
+          stderrChunks.push(data);
+          stderrLen += data.length;
+        }
       });
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        this.activeProcesses.delete(executionId);
+
+        const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8');
 
         if (killed) {
           resolve({
@@ -746,6 +909,13 @@ export class DenoExecutor {
 
       proc.on('error', (error) => {
         clearTimeout(timer);
+        this.activeProcesses.delete(executionId);
+
+        // Reset deno check cache on spawn failure
+        if (error.message.includes('ENOENT')) {
+          this.denoAvailable = null;
+        }
+
         resolve({
           executionId,
           success: false,
