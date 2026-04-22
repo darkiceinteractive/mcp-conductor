@@ -5,7 +5,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { writeFileSync, unlinkSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { logger, generateExecutionId, TimeoutError, RuntimeError, SyntaxError, minimalChildEnv } from '../utils/index.js';
@@ -497,17 +497,35 @@ export class DenoExecutor {
   }
 
   /**
-   * Remove leftover temp files from previous executions that survived crashes
+   * Remove leftover temp files from previous executions that survived crashes.
+   *
+   * Only files older than `STALE_TEMP_FILE_TTL_MS` are removed. Deleting
+   * every `exec_*.ts` unconditionally would race with peer executors running
+   * in parallel (Vitest worker pool, or multiple conductor instances sharing
+   * `/tmp/mcp-executor`) and yank a temp file out from under an in-flight
+   * `deno run`.
    */
   private cleanupStaleTempFiles(): void {
+    const STALE_TEMP_FILE_TTL_MS = 60_000;
+    const now = Date.now();
     try {
       const files = readdirSync(this.tempDir)
         .filter(f => f.startsWith('exec_') && f.endsWith('.ts'));
+      let removed = 0;
       for (const f of files) {
-        try { unlinkSync(join(this.tempDir, f)); } catch { /* ignore */ }
+        const path = join(this.tempDir, f);
+        try {
+          const { mtimeMs } = statSync(path);
+          if (now - mtimeMs > STALE_TEMP_FILE_TTL_MS) {
+            unlinkSync(path);
+            removed++;
+          }
+        } catch {
+          // Ignore individual file stat/unlink failures
+        }
       }
-      if (files.length > 0) {
-        logger.debug(`Cleaned up ${files.length} stale temp files`);
+      if (removed > 0) {
+        logger.debug(`Cleaned up ${removed} stale temp files`);
       }
     } catch {
       // Ignore errors reading temp directory
