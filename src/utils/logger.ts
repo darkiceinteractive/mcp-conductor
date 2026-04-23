@@ -9,6 +9,8 @@
  * @module utils/logger
  */
 
+import { redactSecrets } from './redact.js';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -28,7 +30,10 @@ function formatMessage(level: LogLevel, message: string, meta?: Record<string, u
   const timestamp = new Date().toISOString();
   const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
   const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
-  return `${prefix} ${message}${metaStr}`;
+  // Redact known-secret patterns in both the message and the serialised
+  // meta before writing. Defensive: callers shouldn't log secrets, but
+  // sandbox stdout/stderr can leak them through error strings.
+  return redactSecrets(`${prefix} ${message}${metaStr}`);
 }
 
 export const logger = {

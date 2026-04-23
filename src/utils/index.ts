@@ -10,3 +10,5 @@ export * from './helpers.js';
 export * from './permissions.js';
 export * from './rate-limiter.js';
 export * from './env.js';
+export * from './orphan-watch.js';
+export * from './redact.js';
