@@ -130,6 +130,56 @@ export class MCPExecutorServer {
   /**
    * Register all MCP tools
    */
+  /**
+   * Record metrics + shape the execute_code tool response. Extracted so the
+   * progress/cancel wiring in the handler stays readable.
+   */
+  private finaliseExecuteCodeResult(
+    result: ExecutionResult,
+    code: string,
+    servers: string[] | undefined,
+    verbose: boolean | undefined,
+  ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
+    const executionMetrics = this.metricsCollector.recordExecution({
+      executionId: result.executionId,
+      code,
+      result: result.result,
+      success: result.success,
+      durationMs: result.metrics.executionTimeMs,
+      toolCalls: result.metrics.toolCalls,
+      dataProcessedBytes: result.metrics.dataProcessedBytes,
+      resultSizeBytes: result.metrics.resultSizeBytes,
+      mode: 'execution',
+      serversUsed: servers || [],
+      errorType: result.error?.type,
+    });
+
+    this.modeHandler.recordExecutionCall(executionMetrics.estimatedTokensSaved);
+
+    const output: Record<string, unknown> = {
+      success: result.success,
+      result: result.result,
+      error: result.error,
+    };
+
+    if (verbose) {
+      output.metrics = {
+        execution_time_ms: result.metrics.executionTimeMs,
+        tool_calls: result.metrics.toolCalls,
+        data_processed_bytes: result.metrics.dataProcessedBytes,
+        result_size_bytes: result.metrics.resultSizeBytes,
+        estimated_tokens_saved: executionMetrics.estimatedTokensSaved,
+        savings_percent: executionMetrics.savingsPercent,
+      };
+      output.logs = result.logs;
+    }
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify(output) }],
+      structuredContent: output,
+    };
+  }
+
   private registerTools(): void {
     // Register execute_code tool
     this.server.registerTool(
@@ -179,7 +229,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           logs: z.array(z.string()).optional(),
         },
       },
-      async ({ code, servers, timeout_ms, stream, verbose }) => {
+      async ({ code, servers, timeout_ms, stream, verbose }, extra) => {
         const timeoutMs = Math.min(
           timeout_ms || this.config.execution.defaultTimeoutMs,
           this.config.execution.maxTimeoutMs
@@ -191,53 +241,52 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           servers: servers || 'all',
         });
 
-        const result = await this.executor.execute(code, {
-          timeoutMs,
-          bridgeUrl: this.bridge.getUrl(),
-          servers: servers || [],
-        });
+        // If the client supplied a progressToken in _meta, forward sandbox
+        // progress() calls as MCP notifications/progress. We preallocate the
+        // execution id + stream so we never miss the first event.
+        const progressToken = extra?._meta?.progressToken;
+        const wantProgress = progressToken !== undefined;
+        const wantStream = stream || wantProgress;
+        const executionId = wantStream ? this.executor.generateExecutionId() : undefined;
+        const execStream = executionId ? this.bridge.createStream(executionId) : undefined;
 
-        // Record execution with enhanced metrics collector
-        const executionMetrics = this.metricsCollector.recordExecution({
-          executionId: result.executionId,
-          code,
-          result: result.result,
-          success: result.success,
-          durationMs: result.metrics.executionTimeMs,
-          toolCalls: result.metrics.toolCalls,
-          dataProcessedBytes: result.metrics.dataProcessedBytes,
-          resultSizeBytes: result.metrics.resultSizeBytes,
-          mode: 'execution',
-          serversUsed: servers || [],
-          errorType: result.error?.type,
-        });
-
-        // Track with mode handler
-        this.modeHandler.recordExecutionCall(executionMetrics.estimatedTokensSaved);
-
-        const output: Record<string, unknown> = {
-          success: result.success,
-          result: result.result,
-          error: result.error,
+        const forwardProgress = (percent: number, message?: string): void => {
+          if (!wantProgress || !extra?.sendNotification) return;
+          void extra
+            .sendNotification({
+              method: 'notifications/progress',
+              params: {
+                progressToken,
+                progress: percent,
+                total: 100,
+                ...(message ? { message } : {}),
+              },
+            })
+            .catch((err: unknown) => {
+              logger.debug('Failed to forward progress notification', { error: String(err) });
+            });
         };
-
-        // Only include metrics when verbose is true (saves ~150-300 tokens per response)
-        if (verbose) {
-          output.metrics = {
-            execution_time_ms: result.metrics.executionTimeMs,
-            tool_calls: result.metrics.toolCalls,
-            data_processed_bytes: result.metrics.dataProcessedBytes,
-            result_size_bytes: result.metrics.resultSizeBytes,
-            estimated_tokens_saved: executionMetrics.estimatedTokensSaved,
-            savings_percent: executionMetrics.savingsPercent,
-          };
-          output.logs = result.logs;
+        if (execStream && wantProgress) {
+          execStream.on('progress', (ev: { data: { percent: number; message?: string } }) => {
+            forwardProgress(ev.data.percent, ev.data.message);
+          });
         }
 
-        return {
-          content: [{ type: 'text', text: JSON.stringify(output) }],
-          structuredContent: output,
-        };
+        try {
+          const result = await this.executor.execute(code, {
+            timeoutMs,
+            bridgeUrl: this.bridge.getUrl(),
+            servers: servers || [],
+            stream: wantStream,
+            signal: extra?.signal,
+            executionId,
+          });
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose);
+        } finally {
+          if (execStream) {
+            execStream.removeAllListeners('progress');
+          }
+        }
       }
     );
 

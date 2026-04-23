@@ -38,6 +38,18 @@ export interface ExecutionOptions {
   servers: string[];
   /** Enable streaming mode for real-time progress updates */
   stream?: boolean;
+  /**
+   * AbortSignal tied to the caller's request. When the signal fires we
+   * terminate the Deno process via the same SIGTERM→SIGKILL path used for
+   * shutdown. Surfaces MCP cancellation from the client side.
+   */
+  signal?: AbortSignal;
+  /**
+   * Caller-provided execution id. Lets the MCP server preallocate the id
+   * and subscribe to the matching ExecutionStream *before* Deno spawns, so
+   * we never miss the first progress event.
+   */
+  executionId?: string;
 }
 
 /**
@@ -605,9 +617,20 @@ export class DenoExecutor {
    * Execute code in the Deno sandbox
    */
   async execute(code: string, options: ExecutionOptions): Promise<ExecutionResult> {
-    const executionId = generateExecutionId();
+    const executionId = options.executionId ?? generateExecutionId();
     const startTime = Date.now();
     const streamEnabled = options.stream ?? false;
+
+    // Short-circuit if the caller already cancelled before we started.
+    if (options.signal?.aborted) {
+      return {
+        executionId,
+        success: false,
+        error: { type: 'runtime', message: 'Execution cancelled before start' },
+        logs: [],
+        metrics: { executionTimeMs: 0, toolCalls: 0, dataProcessedBytes: 0, resultSizeBytes: 0 },
+      };
+    }
 
     logger.debug('Starting execution', { executionId, streamEnabled });
 
@@ -645,7 +668,13 @@ export class DenoExecutor {
     writeFileSync(tempFile, sandboxCode);
 
     try {
-      const result = await this.runDeno(tempFile, options.timeoutMs, executionId, options.bridgeUrl);
+      const result = await this.runDeno(
+        tempFile,
+        options.timeoutMs,
+        executionId,
+        options.bridgeUrl,
+        options.signal,
+      );
       return {
         ...result,
         executionId,
@@ -675,7 +704,13 @@ export class DenoExecutor {
   /**
    * Run Deno subprocess
    */
-  private runDeno(filePath: string, timeoutMs: number, executionId: string, bridgeUrl: string): Promise<ExecutionResult> {
+  private runDeno(
+    filePath: string,
+    timeoutMs: number,
+    executionId: string,
+    bridgeUrl: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionResult> {
     return new Promise((resolve) => {
       // Reject if shutting down
       if (this.isShuttingDown) {
@@ -761,6 +796,34 @@ export class DenoExecutor {
         proc.kill('SIGKILL');
       }, timeoutMs);
 
+      // Honour MCP cancellation (RequestHandlerExtra.signal). We kill the
+      // process and flag cancellation so the close handler returns the
+      // dedicated error type instead of a timeout / runtime error.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        killed = true;
+        logger.info('Execution cancelled by client', { executionId });
+        try {
+          proc.kill('SIGTERM');
+          // Escalate to SIGKILL if the process doesn't exit in the grace window.
+          setTimeout(() => {
+            if (this.activeProcesses.has(executionId)) {
+              proc.kill('SIGKILL');
+            }
+          }, LIFECYCLE_TIMEOUTS.PROCESS_FORCE_KILL_MS).unref?.();
+        } catch {
+          // Process may already be gone.
+        }
+      };
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
+
       // Bounded stdout/stderr buffering
       const stdoutChunks: Buffer[] = [];
       let stdoutLen = 0;
@@ -798,9 +861,31 @@ export class DenoExecutor {
       proc.on('close', (code) => {
         clearTimeout(timer);
         this.activeProcesses.delete(executionId);
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
 
         const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
+
+        if (cancelled) {
+          resolve({
+            executionId,
+            success: false,
+            error: {
+              type: 'runtime',
+              message: 'Execution cancelled by client',
+            },
+            logs: [],
+            metrics: {
+              executionTimeMs: 0,
+              toolCalls: 0,
+              dataProcessedBytes: 0,
+              resultSizeBytes: 0,
+            },
+          });
+          return;
+        }
 
         if (killed) {
           resolve({
