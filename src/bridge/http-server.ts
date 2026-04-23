@@ -10,6 +10,13 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { logger } from '../utils/index.js';
 import type { BridgeConfig } from '../config/index.js';
 import { getStreamManager, type ExecutionStream } from '../streaming/index.js';
+import { SessionRegistry } from './session-registry.js';
+
+/**
+ * Header name per MCP spec 2025-03-26 Streamable HTTP transport. Case-
+ * insensitive on the wire, but Node lowercases incoming header keys.
+ */
+const MCP_SESSION_ID_HEADER = 'mcp-session-id';
 
 export interface ToolCallRequest {
   server: string;
@@ -88,9 +95,18 @@ export class HttpBridge {
   private handlers: BridgeHandlers | null = null;
   private startTime: number = Date.now();
   private actualPort: number = 0; // The actual port after binding (for dynamic port allocation)
+  private sessions: SessionRegistry;
 
-  constructor(config: BridgeConfig) {
+  constructor(config: BridgeConfig, sessions?: SessionRegistry) {
     this.config = config;
+    this.sessions = sessions ?? new SessionRegistry();
+  }
+
+  /**
+   * Exposed for tests that need to assert registry state directly.
+   */
+  getSessionRegistry(): SessionRegistry {
+    return this.sessions;
   }
 
   /**
@@ -109,6 +125,7 @@ export class HttpBridge {
     }
 
     this.startTime = Date.now();
+    this.sessions.start();
 
     return new Promise((resolve, reject) => {
       this.server = createServer((req, res) => {
@@ -150,6 +167,7 @@ export class HttpBridge {
         logger.info('HTTP bridge stopped');
         this.server = null;
         this.actualPort = 0; // Reset actual port on stop
+        this.sessions.stop();
         resolve();
       });
     });
@@ -212,6 +230,24 @@ export class HttpBridge {
   }
 
   /**
+   * Normalise the Mcp-Session-Id header. Node surfaces duplicates as string[],
+   * so take the first value and trim. Reject obvious garbage so bad clients
+   * don't get stored in the registry.
+   */
+  private readSessionHeader(value: string | string[] | undefined): string | undefined {
+    if (!value) return undefined;
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (!raw) return undefined;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > 128) return undefined;
+    // MCP spec requires IDs be "globally unique and cryptographically secure".
+    // We generate UUIDs, but clients may pass other printable ASCII schemes;
+    // accept any printable ASCII and let the registry do the real validation.
+    if (!/^[\x21-\x7e]+$/.test(trimmed)) return undefined;
+    return trimmed;
+  }
+
+  /**
    * Handle incoming HTTP request
    */
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -252,14 +288,37 @@ export class HttpBridge {
       originHeader ?? `http://${hostHeader ?? '127.0.0.1'}`,
     );
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id');
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
 
     if (method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
+
+    // Session handling (MCP spec 2025-03-26 Streamable HTTP). The internal
+    // bridge is localhost-only, but we honour the spec so: (a) clients that
+    // reconnect can resume streams; (b) ID rotation is bounded; (c) the same
+    // middleware scales when the bridge is ever exposed (Phase 3a Workers).
+    const incomingSessionId = this.readSessionHeader(req.headers[MCP_SESSION_ID_HEADER]);
+    let sessionId: string | undefined;
+
+    if (incomingSessionId) {
+      const known = this.sessions.touch(incomingSessionId);
+      if (!known) {
+        logger.warn('Rejecting bridge request with unknown Mcp-Session-Id', {
+          session: incomingSessionId,
+        });
+        this.sendError(res, 404, 'Session not found or expired');
+        return;
+      }
+      sessionId = known.id;
+    } else {
+      sessionId = this.sessions.create();
+    }
+    res.setHeader('Mcp-Session-Id', sessionId);
 
     const path = url.pathname;
 
@@ -293,6 +352,12 @@ export class HttpBridge {
       } else if (method === 'GET' && path === '/streams') {
         // List active streams
         await this.handleListStreams(res);
+      } else if (method === 'DELETE' && path === '/session') {
+        // Explicit session termination. Caller's session id is already
+        // validated by the middleware above; sessionId is guaranteed set.
+        this.sessions.terminate(sessionId!);
+        res.writeHead(204);
+        res.end();
       } else {
         this.sendError(res, 404, 'Not found');
       }
