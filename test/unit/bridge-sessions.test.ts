@@ -5,9 +5,14 @@ import type { BridgeConfig } from '../../src/config/schema.js';
 
 /**
  * Mcp-Session-Id header handling per MCP spec 2025-03-26 Streamable HTTP.
- * The bridge is localhost-only today, but we honour the spec so reconnecting
- * clients can resume and so the same middleware scales to external exposure
- * later (Phase 3a).
+ *
+ * The middleware deliberately bypasses sandbox-internal endpoints (`/call`,
+ * `/log`, `/progress`, `/tool-event`, `/servers`, `/search`, `/streams`,
+ * `/health`, `/stream/*`) — the Deno sandbox is not an MCP client and
+ * tracking a session per fetch would saturate the registry on the hot
+ * path. So the round-trip tests below hit `/session` (DELETE-only) and
+ * `/mcp` (a non-sandbox path that falls through to the routing 404 after
+ * middleware sets the header) to exercise session minting and validation.
  */
 
 describe('HttpBridge Mcp-Session-Id header', () => {
@@ -23,7 +28,7 @@ describe('HttpBridge Mcp-Session-Id header', () => {
 
   beforeEach(async () => {
     // Dynamic port allocation avoids TIME_WAIT races between rapid
-    // start/stop cycles across the 14 tests in this file.
+    // start/stop cycles across the tests in this file.
     const bridgeConfig: BridgeConfig = { port: 0, host: '127.0.0.1' };
     bridge = new HttpBridge(bridgeConfig);
     bridge.setHandlers(handlers);
@@ -35,9 +40,10 @@ describe('HttpBridge Mcp-Session-Id header', () => {
     await bridge.stop();
   });
 
-  it('issues a new Mcp-Session-Id when the client omits the header', async () => {
-    const res = await fetch(`http://${TEST_HOST}/health`);
-    expect(res.status).toBe(200);
+  it('issues a new Mcp-Session-Id when the client omits the header (on a non-sandbox path)', async () => {
+    const res = await fetch(`http://${TEST_HOST}/mcp`);
+    // /mcp is not a registered route, so it 404s — but middleware ran first.
+    expect(res.status).toBe(404);
     const sessionId = res.headers.get('mcp-session-id');
     expect(sessionId).toBeTruthy();
     expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
@@ -45,19 +51,18 @@ describe('HttpBridge Mcp-Session-Id header', () => {
   });
 
   it('honours an existing session id when the client presents a known one', async () => {
-    const first = await fetch(`http://${TEST_HOST}/health`);
+    const first = await fetch(`http://${TEST_HOST}/mcp`);
     const sessionId = first.headers.get('mcp-session-id')!;
 
-    const second = await fetch(`http://${TEST_HOST}/health`, {
+    const second = await fetch(`http://${TEST_HOST}/mcp`, {
       headers: { 'Mcp-Session-Id': sessionId },
     });
-    expect(second.status).toBe(200);
     expect(second.headers.get('mcp-session-id')).toBe(sessionId);
     expect(bridge.getSessionRegistry().size()).toBe(1);
   });
 
-  it('returns 404 when the client presents an unknown session id', async () => {
-    const res = await fetch(`http://${TEST_HOST}/health`, {
+  it('returns 404 with a session-error body when the client presents an unknown session id', async () => {
+    const res = await fetch(`http://${TEST_HOST}/mcp`, {
       headers: { 'Mcp-Session-Id': 'deadbeef-dead-beef-dead-beefdeadbeef' },
     });
     expect(res.status).toBe(404);
@@ -67,10 +72,9 @@ describe('HttpBridge Mcp-Session-Id header', () => {
 
   it('rejects malformed session ids (too long) by issuing a new one', async () => {
     const tooLong = 'a'.repeat(200);
-    const res = await fetch(`http://${TEST_HOST}/health`, {
+    const res = await fetch(`http://${TEST_HOST}/mcp`, {
       headers: { 'Mcp-Session-Id': tooLong },
     });
-    expect(res.status).toBe(200);
     const issued = res.headers.get('mcp-session-id');
     expect(issued).toBeTruthy();
     expect(issued).not.toBe(tooLong);
@@ -78,18 +82,18 @@ describe('HttpBridge Mcp-Session-Id header', () => {
   });
 
   it('exposes Mcp-Session-Id via CORS Access-Control-Expose-Headers', async () => {
-    const res = await fetch(`http://${TEST_HOST}/health`);
+    const res = await fetch(`http://${TEST_HOST}/mcp`);
     expect(res.headers.get('access-control-expose-headers')).toMatch(/mcp-session-id/i);
   });
 
   it('allows Mcp-Session-Id on preflight via Access-Control-Allow-Headers', async () => {
-    const res = await fetch(`http://${TEST_HOST}/health`, { method: 'OPTIONS' });
+    const res = await fetch(`http://${TEST_HOST}/mcp`, { method: 'OPTIONS' });
     expect(res.status).toBe(204);
     expect(res.headers.get('access-control-allow-headers')).toMatch(/mcp-session-id/i);
   });
 
-  it('terminates a session on DELETE /session and subsequent requests get 404', async () => {
-    const first = await fetch(`http://${TEST_HOST}/health`);
+  it('terminates a session on DELETE /session and subsequent requests with that id 404', async () => {
+    const first = await fetch(`http://${TEST_HOST}/mcp`);
     const sessionId = first.headers.get('mcp-session-id')!;
 
     const del = await fetch(`http://${TEST_HOST}/session`, {
@@ -99,18 +103,41 @@ describe('HttpBridge Mcp-Session-Id header', () => {
     expect(del.status).toBe(204);
     expect(bridge.getSessionRegistry().size()).toBe(0);
 
-    const after = await fetch(`http://${TEST_HOST}/health`, {
+    const after = await fetch(`http://${TEST_HOST}/mcp`, {
       headers: { 'Mcp-Session-Id': sessionId },
     });
     expect(after.status).toBe(404);
   });
 
-  it('DELETE /session with no session header terminates the just-minted session', async () => {
-    // Without a header, middleware mints a new session — the DELETE handler
-    // then terminates that freshly minted id. Benign; confirms we do not
-    // crash on the edge case.
+  it('DELETE /session with no session header mints then terminates a fresh session', async () => {
     const res = await fetch(`http://${TEST_HOST}/session`, { method: 'DELETE' });
     expect(res.status).toBe(204);
+    expect(bridge.getSessionRegistry().size()).toBe(0);
+  });
+
+  it('does NOT mint a session for sandbox-internal paths (/call, /log, /progress, /tool-event, /servers, /search, /streams, /health, /stream/*)', async () => {
+    // Hammering these paths must leave the registry empty — the original
+    // session-per-fetch bug had each one minting a fresh UUID.
+    const paths = [
+      '/health',
+      '/servers',
+      '/streams',
+      '/search?q=foo',
+    ];
+    for (const p of paths) {
+      const res = await fetch(`http://${TEST_HOST}${p}`);
+      expect(res.headers.get('mcp-session-id')).toBeNull();
+      expect(res.status).toBeLessThan(500);
+    }
+    expect(bridge.getSessionRegistry().size()).toBe(0);
+
+    // POSTs too
+    const callRes = await fetch(`http://${TEST_HOST}/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: 'echo', tool: 'noop', params: {} }),
+    });
+    expect(callRes.headers.get('mcp-session-id')).toBeNull();
     expect(bridge.getSessionRegistry().size()).toBe(0);
   });
 });

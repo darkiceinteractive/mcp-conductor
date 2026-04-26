@@ -48,10 +48,16 @@ jobs:
         id: dist_tag
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          # Match in order. The catch-all `*-*` arm before `*)` ensures
+          # any *unknown* prerelease label (canary, pre, dev, snapshot,
+          # next, even typos like aplha) routes to a non-`latest` dist-tag
+          # so we never silently ship an unstable build to default
+          # `npm install` consumers.
           case "$VERSION" in
             *-alpha*) TAG=alpha ;;
             *-beta*)  TAG=beta ;;
             *-rc*)    TAG=next ;;
+            *-*)      TAG=next ;;
             *)        TAG=latest ;;
           esac
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"

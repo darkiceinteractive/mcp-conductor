@@ -8,6 +8,18 @@ import { startOrphanWatch } from '../../src/utils/orphan-watch.js';
  */
 
 describe('startOrphanWatch', () => {
+  it('does NOT fire when started directly under PID 1 (systemd Type=simple, supervisord, container ENTRYPOINT)', async () => {
+    const onOrphaned = vi.fn();
+    const watch = startOrphanWatch({
+      onOrphaned,
+      intervalMs: 5,
+      getPpid: () => 1,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    watch.stop();
+    expect(onOrphaned).not.toHaveBeenCalled();
+  });
+
   it('does nothing while ppid is unchanged', async () => {
     const onOrphaned = vi.fn();
     const watch = startOrphanWatch({

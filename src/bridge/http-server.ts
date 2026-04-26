@@ -191,10 +191,13 @@ export class HttpBridge {
 
   /**
    * Return true if a bare hostname (no brackets, no port) is loopback.
+   * Hostnames are case-insensitive per RFC 1035 §2.3.3 — `Localhost` and
+   * `LOCALHOST` are valid Host header values, so compare lowercased.
    */
   private static isLoopbackHostname(hostname: string | undefined): boolean {
     if (!hostname) return false;
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    const h = hostname.toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
   }
 
   /**
@@ -227,6 +230,27 @@ export class HttpBridge {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Internal sandbox-only routes that should bypass MCP session middleware.
+   * The Deno sandbox is not an MCP client; tracking a session per call
+   * inflates the registry without any reconnection benefit and forces the
+   * 1000-entry LRU evictor into the hot path.
+   */
+  private static isSandboxInternalPath(path: string): boolean {
+    return (
+      path === '/call' ||
+      path === '/log' ||
+      path === '/progress' ||
+      path === '/tool-event' ||
+      path === '/search' ||
+      path === '/servers' ||
+      path === '/streams' ||
+      path === '/health' ||
+      path.startsWith('/servers/') ||
+      path.startsWith('/stream/')
+    );
   }
 
   /**
@@ -298,29 +322,31 @@ export class HttpBridge {
       return;
     }
 
-    // Session handling (MCP spec 2025-03-26 Streamable HTTP). The internal
-    // bridge is localhost-only, but we honour the spec so: (a) clients that
-    // reconnect can resume streams; (b) ID rotation is bounded; (c) the same
-    // middleware scales when the bridge is ever exposed (Phase 3a Workers).
-    const incomingSessionId = this.readSessionHeader(req.headers[MCP_SESSION_ID_HEADER]);
-    let sessionId: string | undefined;
-
-    if (incomingSessionId) {
-      const known = this.sessions.touch(incomingSessionId);
-      if (!known) {
-        logger.warn('Rejecting bridge request with unknown Mcp-Session-Id', {
-          session: incomingSessionId,
-        });
-        this.sendError(res, 404, 'Session not found or expired');
-        return;
-      }
-      sessionId = known.id;
-    } else {
-      sessionId = this.sessions.create();
-    }
-    res.setHeader('Mcp-Session-Id', sessionId);
-
     const path = url.pathname;
+
+    // Session handling (MCP spec 2025-03-26 Streamable HTTP). Only applied
+    // to MCP-protocol surfaces. The Deno sandbox makes many short-lived
+    // fetches per execution against the internal endpoints below; tracking
+    // a session per fetch would saturate the registry and force the LRU
+    // evictor onto the hot path. We therefore short-circuit those routes.
+    let sessionId: string | undefined;
+    if (!HttpBridge.isSandboxInternalPath(path)) {
+      const incomingSessionId = this.readSessionHeader(req.headers[MCP_SESSION_ID_HEADER]);
+      if (incomingSessionId) {
+        const known = this.sessions.touch(incomingSessionId);
+        if (!known) {
+          logger.warn('Rejecting bridge request with unknown Mcp-Session-Id', {
+            session: incomingSessionId,
+          });
+          this.sendError(res, 404, 'Session not found or expired');
+          return;
+        }
+        sessionId = known.id;
+      } else {
+        sessionId = this.sessions.create();
+      }
+      res.setHeader('Mcp-Session-Id', sessionId);
+    }
 
     try {
       // Route handling

@@ -128,6 +128,31 @@ describe('execute_code progress forwarding', () => {
     expect(note.params.message).toBe('halfway');
   });
 
+  it('completes the ExecutionStream so it falls into the 5/10-min cleanup tier (not the 15-min stuck tier)', async () => {
+    capturedExecutionIds = [];
+    fireProgressDuringExecute = () => {};
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bridge = ((server as any).bridge) as {
+      getStream: (id: string) => { state: { status: string } } | undefined;
+    };
+
+    await callback(
+      { code: 'return 1;' },
+      {
+        signal: new AbortController().signal,
+        _meta: { progressToken: 'tok-stream-complete' },
+        sendNotification: async () => {},
+      },
+    );
+
+    const id = capturedExecutionIds[0]!;
+    const stream = bridge.getStream(id);
+    expect(stream).toBeDefined();
+    // status must be flipped out of `running` once the handler returns.
+    expect(stream!.state.status).toBe('completed');
+  });
+
   it('does not forward progress events when progressToken is absent', async () => {
     capturedExecutionIds = [];
     const notifications: unknown[] = [];

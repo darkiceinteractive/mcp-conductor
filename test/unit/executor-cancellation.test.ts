@@ -59,6 +59,41 @@ describe('DenoExecutor — MCP cancellation', () => {
     expect(result.executionId).toBe(preallocated);
   });
 
+  it('removes the abort listener even when spawn fails (no leak)', async () => {
+    // Force a spawn failure by misconfiguring PATH so `deno` is unfindable.
+    const savedPath = process.env.PATH;
+    const savedDeno = (executor as unknown as { denoAvailable: boolean | null }).denoAvailable;
+    // Mark deno as available so checkDeno() doesn't short-circuit.
+    (executor as unknown as { denoAvailable: boolean | null }).denoAvailable = true;
+    process.env.PATH = '/nonexistent-path-for-spawn-failure-test';
+
+    try {
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      // Count listeners before. There are no abort listeners on a fresh signal.
+      const before = (signal as unknown as { listenerCount?: (event: string) => number })
+        .listenerCount?.('abort') ?? 0;
+      expect(before).toBe(0);
+
+      const result = await executor.execute('return 1;', {
+        timeoutMs: 5000,
+        bridgeUrl: 'http://127.0.0.1:1',
+        servers: [],
+        signal,
+      });
+
+      // Spawn failed → runtime error, but the listener must have been removed.
+      expect(result.success).toBe(false);
+      const after = (signal as unknown as { listenerCount?: (event: string) => number })
+        .listenerCount?.('abort') ?? 0;
+      expect(after).toBe(0);
+    } finally {
+      process.env.PATH = savedPath;
+      (executor as unknown as { denoAvailable: boolean | null }).denoAvailable = savedDeno;
+    }
+  });
+
   it('kills the Deno process when the signal aborts mid-execution', async () => {
     const controller = new AbortController();
     // Long-running code: sleep 30s then return.

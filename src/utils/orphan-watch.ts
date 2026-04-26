@@ -49,9 +49,12 @@ export function startOrphanWatch(options: OrphanWatchOptions): OrphanWatch {
   const timer = setInterval(() => {
     if (fired) return;
     const current = getPpid();
-    // PID 1 on POSIX → reparented to init; any change from initial is also
-    // treated as a signal since Windows reparenting is less well-defined.
-    if (current === 1 || current !== initialPpid) {
+    // We treat *any* change from the startup ppid as orphaning. We do NOT
+    // also treat ppid===1 as orphaning unconditionally, because conductor
+    // is sometimes launched directly under PID 1 (systemd Type=simple,
+    // supervisord, container ENTRYPOINT) — in those environments the
+    // initial ppid is already 1 and the watchdog must not self-fire.
+    if (current !== initialPpid) {
       fired = true;
       log.warn('Parent process gone, triggering orphan shutdown', {
         initialPpid,

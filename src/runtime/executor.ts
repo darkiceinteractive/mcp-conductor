@@ -995,6 +995,13 @@ export class DenoExecutor {
       proc.on('error', (error) => {
         clearTimeout(timer);
         this.activeProcesses.delete(executionId);
+        // Symmetric with the close handler — without this the abort
+        // listener stays attached to the AbortSignal until the SDK GCs
+        // the request, leaking closure refs across repeated spawn
+        // failures (EAGAIN/EMFILE/ENOENT).
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
 
         // Reset deno check cache on spawn failure
         if (error.message.includes('ENOENT')) {

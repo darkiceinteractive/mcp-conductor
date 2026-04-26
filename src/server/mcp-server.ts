@@ -20,6 +20,7 @@ import { shutdownModeHandler } from '../modes/index.js';
 import { shutdownSkillsEngine } from '../skills/index.js';
 import type { MCPExecutorConfig, ExecutionMode, ConductorConfig } from '../config/index.js';
 import { loadConductorConfig, saveConductorConfig, getDefaultConductorConfigPath } from '../config/index.js';
+import { VERSION } from '../version.js';
 
 /**
  * MCP Executor Server
@@ -58,7 +59,7 @@ export class MCPExecutorServer {
     this.server = new McpServer({
       name: 'mcp-conductor',
       title: 'MCP Conductor',
-      version: '0.1.0',
+      version: VERSION,
       websiteUrl: 'https://github.com/darkiceinteractive/mcp-conductor',
       icons: [
         {
@@ -272,8 +273,9 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           });
         }
 
+        let result: ExecutionResult | undefined;
         try {
-          const result = await this.executor.execute(code, {
+          result = await this.executor.execute(code, {
             timeoutMs,
             bridgeUrl: this.bridge.getUrl(),
             servers: servers || [],
@@ -284,6 +286,23 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           return this.finaliseExecuteCodeResult(result, code, servers, verbose);
         } finally {
           if (execStream) {
+            // Flip the stream out of `running` so StreamManager's normal
+            // 5/10-min cleanup applies instead of the 15-min stuck-stream
+            // sweep. Only fire complete() if we actually got a result —
+            // if execute() threw, the stream will time out via the stuck
+            // path which is the right safety net.
+            if (result) {
+              execStream.complete({
+                success: result.success,
+                result: result.result,
+                error: result.error,
+                metrics: {
+                  executionTimeMs: result.metrics.executionTimeMs,
+                  toolCalls: result.metrics.toolCalls,
+                  dataProcessedBytes: result.metrics.dataProcessedBytes,
+                },
+              });
+            }
             execStream.removeAllListeners('progress');
           }
         }
@@ -694,7 +713,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           : { loaded: 0, categories: [] };
 
         const output = {
-          version: '0.1.0',
+          version: VERSION,
           current_mode: this.currentMode,
           features: {
             streaming: this.config.execution.streamingEnabled,
