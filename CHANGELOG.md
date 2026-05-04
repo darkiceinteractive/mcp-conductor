@@ -9,6 +9,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **D7b — Article 1 source** at `articles/v3-architecture/article.md`. ~1500 words. Architecture overview, 99.7% Anthropic head-to-head benchmark, token-savings reporter example, 3+ Mermaid diagrams. Built artifacts via `npm run build:articles -- --slug=v3-architecture` (HTML + MD + Medium-MD + SVG/PNG diagrams). Owner reviews + clicks Publish on Medium when v3.1 ships.
 - **Docs site versioning + custom domain (D3 + D4)**:
   - D3: Docusaurus multi-version support enabled. v3 (latest) at `/`, v2.0 (alpha) at `/v2`. Version dropdown in navbar.
   - D4: Cloudflare Pages deployment runbook at `scripts/deploy-docs-pages.md` covering custom domain setup (`docs.darkice.co`), DNS, SSL, branch previews, and troubleshooting.
