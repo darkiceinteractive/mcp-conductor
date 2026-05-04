@@ -290,3 +290,53 @@ describe('HIGH-3: broadcast envelope isolation', () => {
     await sub.disconnect();
   });
 });
+
+// ---------------------------------------------------------------------------
+// B4: sharedSecretPath validation — must resolve within CONDUCTOR_DIR
+// ---------------------------------------------------------------------------
+
+describe('B4: sharedSecretPath must resolve within CONDUCTOR_DIR', () => {
+  it('path outside CONDUCTOR_DIR throws with explicit error message', () => {
+    expect(() => {
+      new DaemonServer({
+        auth: { sharedSecretPath: '/tmp/secret.json' },
+      });
+    }).toThrow('DaemonServer: sharedSecretPath must resolve within CONDUCTOR_DIR');
+  });
+
+  it('relative path throws (must be absolute)', () => {
+    expect(() => {
+      new DaemonServer({
+        auth: { sharedSecretPath: 'relative/path/secret.json' },
+      });
+    }).toThrow('DaemonServer: sharedSecretPath must resolve within CONDUCTOR_DIR');
+  });
+
+  it('path traversal attempt outside CONDUCTOR_DIR throws', () => {
+    const { homedir } = require('node:os') as typeof import('node:os');
+    const { join: pathJoin } = require('node:path') as typeof import('node:path');
+    const conductorDir = pathJoin(homedir(), '.mcp-conductor');
+    const traversal = pathJoin(conductorDir, '..', 'evil-secret.json');
+    expect(() => {
+      new DaemonServer({
+        auth: { sharedSecretPath: traversal },
+      });
+    }).toThrow('DaemonServer: sharedSecretPath must resolve within CONDUCTOR_DIR');
+  });
+
+  it('no sharedSecretPath supplied (default path) does not throw on construction', () => {
+    // When sharedSecretPath is not set the B4 check is skipped entirely.
+    // Supply sharedSecret directly so no file I/O occurs during this unit test.
+    const dir = makeTempDir();
+    try {
+      expect(() => {
+        new DaemonServer({
+          socketPath: join(dir, 'daemon.sock'),
+          auth: { sharedSecret: TEST_SECRET },
+        });
+      }).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

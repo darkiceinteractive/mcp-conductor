@@ -19,7 +19,7 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net';
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -171,6 +171,20 @@ export class DaemonServer {
     this.tcpPort = options.tcpPort;
 
     const authPath = options.auth?.sharedSecretPath ?? DEFAULT_AUTH_PATH;
+
+    // B4: Validate that sharedSecretPath resolves within CONDUCTOR_DIR.
+    // A caller-controlled path could otherwise cause chmodSync to narrow
+    // permissions on an arbitrary file outside the conductor directory.
+    if (options.auth?.sharedSecretPath !== undefined) {
+      const resolvedDir = resolve(dirname(authPath));
+      const conductorDir = resolve(CONDUCTOR_DIR);
+      if (!isAbsolute(authPath) || !resolvedDir.startsWith(conductorDir + '/') && resolvedDir !== conductorDir) {
+        throw new Error(
+          `DaemonServer: sharedSecretPath must resolve within CONDUCTOR_DIR (~/.mcp-conductor). Got: ${authPath}`,
+        );
+      }
+    }
+
     this.sharedSecret = options.auth?.sharedSecret ?? loadOrCreateSecret(authPath);
 
     this.kv = new SharedKV(options.kvOptions);
