@@ -72,12 +72,13 @@ describe('findClaudeConfigsWithServers', () => {
 });
 
 describe('writeBackup', () => {
-  it('copies source file to .bak path and returns bak path', () => {
+  it('copies source file to timestamped .bak path and returns bak path', () => {
     const dir = tmpDir();
     const src = join(dir, 'config.json');
     writeJson(src, { test: true });
     const bakPath = writeBackup(src);
-    expect(bakPath).toBe(`${src}.bak`);
+    // B10: timestamped suffix .bak.YYYYMMDDHHMMSS (14 digits)
+    expect(bakPath).toMatch(/\.bak\.\d{14}$/);
     expect(existsSync(bakPath)).toBe(true);
     expect(readFileSync(bakPath, 'utf-8')).toBe(readFileSync(src, 'utf-8'));
   });
