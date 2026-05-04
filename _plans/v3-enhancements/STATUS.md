@@ -197,7 +197,71 @@ READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/9
 ## Agent K — Integration day
 **Branch**: `feature/v3` directly (no worktree — runs at the main repo path) · **Blocked by**: all merged
 
-_(awaiting agent)_
+[2026-05-04 17:00 AEDT] START — all 10 PRs in flight, beginning Block 1 merges.
+  Base: feature/v3 at e8bf3b8 (docs(v3) handoff bundle).
+  Strategy: rebase each worktree branch onto feature/v3 in dependency order, force-push, then merge.
+
+[2026-05-04 17:05 AEDT] ✓ Block 1 complete — all 10 PRs merged into feature/v3.
+  Merge order and commit SHAs on feature/v3:
+    PR #2  feat(v3-phase-0-1) ToolRegistry+TypeGen   → a2f5b1f
+    PR #3  feat(v3-x1) passthrough adapter            → 13eec20
+    PR #4  feat(v3-phase-4) connection+sandbox pools  → f7607b6
+    PR #5  feat(v3-phase-7) observability+replay      → d79e9e2
+    PR #6  feat(v3-phase-6) daemon+KV+lock            → 03a40e3
+    PR #7  feat(v3-phase-3) reliability gateway       → b79aa6a
+    PR #8  feat(v3-phase-2) cache LRU+CBOR+delta      → 169b6b9
+    PR #9  feat(v3-x4) PII tokenization               → fb76a67
+    PR #10 feat(v3-x2) lifecycle tools+CLI wizard     → 43e91c4
+    PR #11 feat(v3-phase-5) sandbox capabilities      → b7fdb0d
+  Post-merge build: clean tsc, 1222 tests passing / 1 skipped (76 files).
+  Key repair: mcp-server.ts reconstructed (X2 mid-function insertion + missing import keyword) → 996b6f1.
+
+[2026-05-04 17:08 AEDT] ✓ Block 2 complete — Anthropic pattern benchmark.
+  Fixture: 300 Drive docs x 1,450 bytes = 153,900 passthrough tokens → 435 execution tokens.
+  Result: 99.72% reduction (gate: >=98%). Beats Anthropic published 98.67% claim.
+  Files: test/fixtures/google-drive-to-salesforce.ts, test/benchmark/anthropic-pattern.test.ts (11/11 pass).
+  Docs: docs/benchmarks/anthropic-comparison-2026-05-04.{md,json}.
+
+[2026-05-04 17:10 AEDT] ✓ Block 3 complete — 10s soak test.
+  Fault profile: 10% timeout (80ms gate), 5% HTTP 500, 1% truncated JSON.
+  Result: 94% success rate, 100 calls, 0 hangs (max call duration 94ms < 400ms limit).
+  File: test/benchmark/soak-test.test.ts (4/4 pass).
+  Docs: docs/benchmarks/soak-test-2026-05-04.md.
+
+[2026-05-04 17:14 AEDT] ✓ Block 4 complete — 5 documentation files + README update.
+  Files written:
+    docs/v3/architecture.md — ASCII component stack diagram
+    docs/v3/migration.md — v2 to v3 breaking changes + migration steps
+    docs/v3/configuration.md — full config reference (8 sections)
+    docs/v3/sandbox-api.md — mcp.callTool, tokenize, compact, summarize, findTool, budget, shared, env
+    docs/v3/recipes.md — 7 workflow examples
+  README.md — headline updated to 99.7%, token example updated, What's New in v3 table added.
+
+[2026-05-04 17:17 AEDT] ✓ Block 5 complete — version bump + tag.
+  package.json: 2.0.0-alpha.1 → 3.0.0-beta.1.
+  Commit: 83a887e (chore(v3): bump to 3.0.0-beta.1 + integration deliverables).
+  Tag: v3.0.0-beta.1 → SHA 83a887ee37fe8942d3b083b37eb5f25cd39b446c. Pushed to origin.
+  npm publish: NOT published — beta, awaiting Matt's explicit QA approval.
+
+[2026-05-04 17:17 AEDT] ✓ Block 6 complete — PR opened.
+  READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/12
+  (DO NOT MERGE without explicit Matt approval and full QA pass.)
+
+[2026-05-04 17:17 AEDT] ✓ Block 7 complete — worktree cleanup.
+  All 10 sprint worktrees removed (git worktree remove --force).
+  All 10 local feature branches deleted (feature/v3-phase-0-1 through feature/v3-x4-tokenization).
+  mcp-executor-darkice-worktrees/ directory is empty.
+
+[2026-05-04 17:17 AEDT] ✓ Block 8 complete — STATUS.md updated.
+
+Final state:
+  Branch: feature/v3 at 83a887e
+  Tag: v3.0.0-beta.1 (SHA 83a887ee37fe8942d3b083b37eb5f25cd39b446c)
+  PR: https://github.com/darkiceinteractive/mcp-conductor/pull/12 (open, not merged)
+  Tests: 1222 passing / 1 skipped / 76 files
+  Token reduction: 99.72% (Google Drive to Salesforce, 300 docs)
+  Soak: 94% success, 0 hangs, 10s at 10%/5%/1% fault profile
+  completed.
 
 ---
 
