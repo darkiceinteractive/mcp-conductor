@@ -1,0 +1,6 @@
+{
+  "store": { "key": "conductor-test", "value": "hello from recording harness" },
+  "retrieve": { "key": "conductor-test" },
+  "list": {},
+  "delete": { "key": "conductor-test" }
+}

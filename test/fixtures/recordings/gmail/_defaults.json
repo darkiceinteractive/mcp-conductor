@@ -1,0 +1,7 @@
+{
+  "list_labels": {},
+  "search_threads": { "query": "is:unread", "maxResults": 5 },
+  "get_thread": { "id": "THREAD_ID_PLACEHOLDER" },
+  "list_drafts": {},
+  "get_message": { "id": "MESSAGE_ID_PLACEHOLDER" }
+}
