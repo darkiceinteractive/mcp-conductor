@@ -1,0 +1,6 @@
+{
+  "list_directory": { "path": "/tmp" },
+  "read_file": { "path": "/tmp/test.txt" },
+  "search_files": { "path": "/tmp", "pattern": "*.txt" },
+  "write_file": { "path": "/tmp/conductor-test-record.txt", "content": "conductor recording test" }
+}

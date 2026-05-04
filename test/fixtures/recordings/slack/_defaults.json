@@ -1,0 +1,5 @@
+{
+  "list_channels": { "limit": 10 },
+  "get_channel_messages": { "channel_id": "CHANNEL_ID_PLACEHOLDER", "limit": 5 },
+  "search_messages": { "query": "mcp conductor", "count": 5 }
+}

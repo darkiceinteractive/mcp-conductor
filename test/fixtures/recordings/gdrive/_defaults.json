@@ -1,0 +1,6 @@
+{
+  "list_recent_files": { "maxResults": 10 },
+  "search_files": { "query": "mimeType='application/pdf'", "maxResults": 5 },
+  "get_file_metadata": { "fileId": "FILE_ID_PLACEHOLDER" },
+  "read_file_content": { "fileId": "FILE_ID_PLACEHOLDER" }
+}

@@ -1,0 +1,19 @@
+{
+  "server": "filesystem",
+  "tool": "list_directory",
+  "argsHash": "sha256:d4e5f6a7b8c90004",
+  "args": {
+    "path": "/tmp"
+  },
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "[{\"name\":\"tmp-work-a\",\"type\":\"directory\",\"size\":null,\"modified\":\"2026-05-04T01:00:00Z\"},{\"name\":\"tmp-work-b\",\"type\":\"directory\",\"size\":null,\"modified\":\"2026-05-04T00:30:00Z\"},{\"name\":\"report-2026-05-04.txt\",\"type\":\"file\",\"size\":2048,\"modified\":\"2026-05-04T02:00:00Z\"},{\"name\":\"data-export.json\",\"type\":\"file\",\"size\":51200,\"modified\":\"2026-05-03T22:00:00Z\"},{\"name\":\"logs.txt\",\"type\":\"file\",\"size\":10240,\"modified\":\"2026-05-04T01:30:00Z\"},{\"name\":\"archive-2026-04.tar.gz\",\"type\":\"file\",\"size\":1048576,\"modified\":\"2026-04-30T23:59:00Z\"},{\"name\":\"config-backup.yaml\",\"type\":\"file\",\"size\":512,\"modified\":\"2026-05-01T10:00:00Z\"}]"
+      }
+    ]
+  },
+  "responseBytes": 574,
+  "recordedAt": "2026-05-04T02:00:00.000Z",
+  "synthetic": true
+}

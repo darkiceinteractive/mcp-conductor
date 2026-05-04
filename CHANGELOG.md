@@ -12,6 +12,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - **Docs site versioning + custom domain (D3 + D4)**:
   - D3: Docusaurus multi-version support enabled. v3 (latest) at `/`, v2.0 (alpha) at `/v2`. Version dropdown in navbar.
   - D4: Cloudflare Pages deployment runbook at `scripts/deploy-docs-pages.md` covering custom domain setup (`docs.darkice.co`), DNS, SSL, branch previews, and troubleshooting.
+- **Popular-MCP test infrastructure (T4 + T5 + T6 + T7)**:
+  - T6: Recording harness `npm run record:fixtures -- <server>` captures real MCP responses to `test/fixtures/recordings/`. PII tokenized at capture time so fixtures are commit-safe.
+  - T4: Functional test suites at `test/popular-mcps/<server>/recorded.test.ts` for 10 servers (github, gmail, gdrive, gcalendar, filesystem, brave-search, memory, slack, notion, linear). Synthetic fixtures for github + filesystem ship in this PR; remaining servers gated until owner runs the recording harness.
+  - T5: Token-savings validation at `test/popular-mcps/token-savings/` asserts each tool meets its category target (>=95% listing, >=70% detail, >=90% read-content, >=92% search). Uses `computeTokenSavings()` from B13.
+  - T7: Nightly workflow at `.github/workflows/nightly.yml` (3 jobs: memory-soak, real-api-popular-mcps, security-fuzz). Documented in `docs/dev/nightly-workflow.md`.
 - **D2 — v3 docs migrated into Docusaurus** at `docs.darkice.co` (build green; sidebar configured for Architecture, Configuration, Sandbox API, Recipes, Migration).
 - **D5 — CHANGELOG backfilled** to v1.0.0 in Keep a Changelog format.
 - **D6 — README v3.1 refresh** with v3 stats, docs site link, token-savings reporter quick example.

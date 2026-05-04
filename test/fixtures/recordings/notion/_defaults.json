@@ -1,0 +1,5 @@
+{
+  "search": { "query": "test", "page_size": 5 },
+  "get_page": { "page_id": "PAGE_ID_PLACEHOLDER" },
+  "list_databases": {}
+}
