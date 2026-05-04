@@ -458,10 +458,15 @@ export class DaemonServer {
         const channel = p?.channel as string;
         const message = p?.message;
         this.bus.broadcast(channel, message);
-        const pushPayload = JSON.stringify({ id: '__push__', result: { channel, message } });
+        // HIGH-3: wrap in a dedicated envelope so clients cannot confuse a
+        // broadcast with an RPC response (e.g. a malicious {id:42,result:{}}
+        // broadcast would not be routed to pending RPC id 42).
+        // Note: sender is included so self-subscribing clients receive their
+        // own broadcasts (the envelope protection prevents injection regardless).
+        const envelope = JSON.stringify({ __broadcast__: true, channel, message }) + '\n';
         for (const [client] of this.clients) {
           if (!client.destroyed) {
-            client.write(pushPayload + '\n');
+            client.write(envelope);
           }
         }
         return null;
