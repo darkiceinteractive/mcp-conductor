@@ -67,10 +67,6 @@ export function loadOrCreateSecret(authPath: string): string {
   return secret;
 }
 
-function hmacToken(secret: string, nonce: string): string {
-  return createHmac('sha256', secret).update(nonce).digest('hex');
-}
-
 // ---------------------------------------------------------------------------
 // Protocol types
 // ---------------------------------------------------------------------------
@@ -440,7 +436,10 @@ export class DaemonServer {
       return;
     }
 
-    const expected = hmacToken(this.sharedSecret, nonce);
+    // B11: hmacToken() was previously a module-level function. Inlined here to
+    // prevent future callers from accidentally reusing it with a caller-supplied
+    // nonce outside of the auth flow.
+    const expected = createHmac('sha256', this.sharedSecret).update(nonce).digest('hex');
     const expectedBuf = Buffer.from(expected, 'utf-8');
     const providedBuf = Buffer.from(token, 'utf-8');
 
