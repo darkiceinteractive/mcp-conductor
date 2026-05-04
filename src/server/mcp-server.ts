@@ -1972,8 +1972,34 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
 
           throw new Error(`Unknown tool: ${serverName}.${toolName}`);
         } else {
+
+          // Check registry for X4 redact annotation on this tool
+          const toolDef = this.registry.getTool(serverName, toolName);
+          const matchers = toolDef?.redact?.response ?? [];
+
           // Use real hub for tool calls — instrument for observability
           const _obsStart = Date.now();
+
+          if (matchers.length > 0) {
+            // Tokenize PII before the result reaches the sandbox
+            const { result, reverseMap } = await this.hub.callToolTokenized(
+              serverName,
+              toolName,
+              params,
+              matchers
+            );
+            const _obsLatency = Date.now() - _obsStart;
+            const _obsResultStr = JSON.stringify(result ?? '');
+            getHotPathProfiler().record(serverName, toolName, _obsLatency);
+            getAnomalyDetector().record(serverName, toolName, _obsLatency, _obsResultStr.length);
+            getCostPredictor().record(serverName, toolName, params as Record<string, unknown>, {
+              outputText: _obsResultStr,
+              latencyMs: _obsLatency,
+            });
+            // Return TokenizedCallResult sentinel — http-server.ts unwraps it
+            return { __x4_result: result, __x4_reverseMap: reverseMap };
+          }
+
           const _obsResult = await this.hub.callTool(serverName, toolName, params);
           const _obsLatency = Date.now() - _obsStart;
           const _obsResultStr = JSON.stringify(_obsResult ?? '');
