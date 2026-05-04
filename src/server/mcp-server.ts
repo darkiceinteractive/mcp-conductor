@@ -34,6 +34,7 @@ import {
   shutdownAnomalyDetector,
   shutdownReplayRecorder,
 } from '../observability/index.js';
+import {
   findClaudeConfigsWithServers,
   importServers,
   formatImportResults,
@@ -1639,6 +1640,38 @@ Triggers a reload to apply changes immediately.`,
       {
         title: 'Replay Session',
         description: 'Replay a recorded session, optionally applying modifications. Detects divergence when replayed result differs from recorded result.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          recordingPath: z.string().describe('Path to the .jsonl recording file.'),
+          modifications: z.array(z.object({
+            at: z.number().describe('Zero-based sequence index to target.'),
+            op: z.enum(['replace', 'skip']).describe('Operation: replace the result or skip the event.'),
+            with: z.unknown().optional().describe('Replacement value for replace operation.'),
+          })).optional().describe('Optional list of modifications to apply during replay.'),
+        },
+        outputSchema: {
+          result: z.unknown(),
+          divergence: z.object({
+            at: z.number(),
+            expected: z.unknown(),
+            actual: z.unknown(),
+          }).optional(),
+        },
+      },
+      async ({ recordingPath, modifications }) => {
+        const recorder = getReplayRecorder();
+        const { result, divergence } = recorder.replay(recordingPath, modifications ?? []);
+        const output = { result, divergence };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
 
     // ------------------------------------------------------------------
     // Lifecycle tools (Workstream X2)
@@ -1759,30 +1792,6 @@ Returns actionable information about why a server may be failing.`,
           openWorldHint: false,
         },
         inputSchema: {
-          recordingPath: z.string().describe('Path to the .jsonl recording file.'),
-          modifications: z.array(z.object({
-            at: z.number().describe('Zero-based sequence index to target.'),
-            op: z.enum(['replace', 'skip']).describe('Operation: replace the result or skip the event.'),
-            with: z.unknown().optional().describe('Replacement value for replace operation.'),
-          })).optional().describe('Optional list of modifications to apply during replay.'),
-        },
-        outputSchema: {
-          result: z.unknown(),
-          divergence: z.object({
-            at: z.number(),
-            expected: z.unknown(),
-            actual: z.unknown(),
-          }).optional(),
-        },
-      },
-      async ({ recordingPath, modifications }) => {
-        const recorder = getReplayRecorder();
-        const { result, divergence } = recorder.replay(recordingPath, modifications ?? []);
-        const output = { result, divergence };
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
-          structuredContent: output,
-        };
           name: z.string().describe('Server name to diagnose (must be in conductor config).'),
         },
         outputSchema: {
@@ -1936,7 +1945,7 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
         this.registry.getAllTools(),
         (server, name, meta) => this.registry.annotate(server, name, meta)
       );
-      registerPassthroughTools(this.registry, this.server, this.hub);
+      registerPassthroughTools(this.registry, this.server as unknown as import('./passthrough-registrar.js').McpServerLike, this.hub);
     }
 
     // Set up bridge handlers
@@ -1972,7 +1981,6 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
 
           throw new Error(`Unknown tool: ${serverName}.${toolName}`);
         } else {
-
           // Check registry for X4 redact annotation on this tool
           const toolDef = this.registry.getTool(serverName, toolName);
           const matchers = toolDef?.redact?.response ?? [];
