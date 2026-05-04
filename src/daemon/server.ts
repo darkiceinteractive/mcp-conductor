@@ -424,14 +424,19 @@ export class DaemonServer {
         const key = p?.key as string;
         const timeoutMs = p?.timeoutMs as number | undefined;
 
+        // HIGH-2: Reject if this client already holds the lock for this key.
+        // Silently overwriting the handle would orphan the old handle and
+        // permanently deadlock the key for all clients.
+        if (state.lockHandles.has(key)) {
+          throw new Error(`ALREADY_HOLDS_LOCK: Already holding lock for key '${key}'`);
+        }
+
         // Acquire the lock — this awaits until the lock is free.
         // Node.js is async; concurrent awaits on different sockets yield to
         // the event loop, so release RPCs from other clients can proceed.
         const handle = await this.lock.acquire(key, { timeoutMs });
 
         // Persist the handle so lock.release can find and call it.
-        // Use a composite key of lockKey + requestId to support multiple
-        // concurrent locks per client on different keys.
         state.lockHandles.set(key, handle);
 
         return { acquired: true, key };
