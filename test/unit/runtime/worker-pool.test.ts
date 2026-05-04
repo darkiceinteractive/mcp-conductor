@@ -191,3 +191,77 @@ describe('WorkerPool (mocked workers)', () => {
     expect(recycleCount).toBeLessThan(1000);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B7: Recycle window — 'starting' state prevents premature job routing
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('B7: worker recycle window — starting state', () => {
+  it('isEligible returns false for a starting worker', () => {
+    // A replacement pushed synchronously into the pool while still 'starting'
+    // must not be selected for job routing by _findIdle().
+    const result = isEligible(
+      { id: 'w-new', state: 'starting', createdAt: Date.now(), jobsRun: 0 },
+      { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+    );
+    expect(result).toBe(false);
+  });
+
+  it('isEligible returns true once the replacement reaches idle state', () => {
+    // After start() resolves and PooledWorker.state transitions to 'idle',
+    // the worker becomes eligible for job routing.
+    const result = isEligible(
+      { id: 'w-new', state: 'idle', createdAt: Date.now(), jobsRun: 0 },
+      { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+    );
+    expect(result).toBe(true);
+  });
+
+  it('evaluateRecycle does not mark a starting worker as an error', () => {
+    // A 'starting' replacement is not in an error state — it must not be
+    // immediately recycled again. Only 'dead' and 'recycling' trigger the
+    // error path.
+    const r = evaluateRecycle(
+      { id: 'w-new', state: 'starting', createdAt: Date.now(), jobsRun: 0 },
+      { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+    );
+    expect(r.shouldRecycle).toBe(false);
+  });
+
+  it('no jobs routed to non-idle workers during recycle burst', () => {
+    // Core invariant: _findIdle() skips any worker not in exactly 'idle' state.
+    // Validate via isEligible across all non-idle states.
+    const nonIdleStates: Array<RecycleCandidate['state']> = [
+      'starting', 'busy', 'recycling', 'dead',
+    ];
+    for (const state of nonIdleStates) {
+      const eligible = isEligible(
+        { id: 'w', state, createdAt: Date.now(), jobsRun: 0 },
+        { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+      );
+      expect(eligible).toBe(false);
+    }
+  });
+
+  it('dead and recycling workers trigger error recycle; starting and busy do not', () => {
+    const errorStates: Array<RecycleCandidate['state']> = ['dead', 'recycling'];
+    for (const state of errorStates) {
+      const r = evaluateRecycle(
+        { id: 'w', state, createdAt: Date.now(), jobsRun: 0 },
+        { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+      );
+      expect(r.shouldRecycle).toBe(true);
+      expect(r.reason).toBe('error');
+    }
+
+    const nonErrorStates: Array<RecycleCandidate['state']> = ['starting', 'busy'];
+    for (const state of nonErrorStates) {
+      const r = evaluateRecycle(
+        { id: 'w', state, createdAt: Date.now(), jobsRun: 0 },
+        { maxJobsPerWorker: 100, maxAgeMs: 600_000 }
+      );
+      // A starting/busy worker with no age/job-count pressure is not recycled.
+      expect(r.shouldRecycle).toBe(false);
+    }
+  });
+});

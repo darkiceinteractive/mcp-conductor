@@ -67,10 +67,27 @@ export function findClaudeConfigsWithServers(configPaths?: string[]): Array<{ pa
 }
 
 /**
- * Write a .bak file alongside the original.
+ * Write a timestamped backup file alongside the original.
+ *
+ * B10: Uses a `.bak.YYYYMMDDHHMMSS` suffix so repeat runs produce distinct
+ * files rather than silently overwriting the previous backup. If a file with
+ * the same timestamp already exists (sub-second collision), a random 4-char
+ * hex suffix is appended to guarantee uniqueness.
+ *
+ * @returns The path of the backup file that was written.
  */
 export function writeBackup(filePath: string): string {
-  const backupPath = `${filePath}.bak`;
+  // Generate YYYYMMDDHHMMSS from current UTC time.
+  // toISOString() → "2026-05-04T11:23:45.678Z"; strip non-digits, take first 14.
+  const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  let backupPath = `${filePath}.bak.${ts}`;
+
+  // Sub-second collision guard: append 4 random hex chars.
+  if (existsSync(backupPath)) {
+    const salt = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
+    backupPath = `${backupPath}.${salt}`;
+  }
+
   copyFileSync(filePath, backupPath);
   return backupPath;
 }

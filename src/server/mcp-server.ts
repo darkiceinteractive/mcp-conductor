@@ -66,6 +66,15 @@ export class MCPExecutorServer {
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
 
+  /**
+   * B6: Tracks whether registerPassthroughTools() has completed in start().
+   * MUST be true before server.connect(transport) is called. Exposed
+   * internally so tests can assert the ordering invariant without spawning
+   * a real stdio transport.
+   * @internal
+   */
+  _passthroughRegistrationComplete = false;
+
   constructor(config: MCPExecutorConfig, options?: { useMockServers?: boolean }) {
     this.config = config;
     this.useMockServers = options?.useMockServers ?? false;
@@ -167,9 +176,6 @@ export class MCPExecutorServer {
   }
 
   /**
-   * Register all MCP tools
-   */
-  /**
    * Record metrics + shape the execute_code tool response. Extracted so the
    * progress/cancel wiring in the handler stays readable.
    */
@@ -237,6 +243,13 @@ export class MCPExecutorServer {
     };
   }
 
+  /**
+   * Register all 24 static MCP tools on the SDK server instance.
+   * Called from the constructor — runs synchronously before `start()`.
+   * Passthrough tools (dynamic, registry-backed) are registered later in
+   * `start()` via `registerPassthroughTools()`, strictly before the SDK
+   * transport connects (B6 ordering invariant).
+   */
   private registerTools(): void {
     // Register execute_code tool
     this.server.registerTool(
@@ -2004,6 +2017,16 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
         (server, name, meta) => this.registry.annotate(server, name, meta)
       );
       registerPassthroughTools(this.registry, this.server as unknown as import('./passthrough-registrar.js').McpServerLike, this.hub);
+      // B6: All passthrough tools are now registered. Set the flag so that
+      // tests (and future guards) can assert the ordering invariant:
+      // this._passthroughRegistrationComplete must be true before
+      // server.connect(transport) is called below.
+      this._passthroughRegistrationComplete = true;
+    } else {
+      // When useMockServers is active there are no passthrough tools to
+      // register, but we mark the flag so the transport-connect guard below
+      // does not need a separate branch.
+      this._passthroughRegistrationComplete = true;
     }
 
     // Set up bridge handlers
@@ -2176,6 +2199,16 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
 
     // Start bridge server
     await this.bridge.start();
+
+    // B6: Guard — passthrough registration MUST complete before the SDK
+    // transport connects. If this ever throws it indicates a code-path bug
+    // (e.g. an early-return inserted above that bypasses the flag assignment).
+    if (!this._passthroughRegistrationComplete) {
+      throw new Error(
+        'MCPExecutorServer: passthrough tool registration did not complete before transport connect. ' +
+        'This is a bug — do not call server.connect(transport) before registerPassthroughTools() returns.'
+      );
+    }
 
     // Connect to stdio transport
     const transport = new StdioServerTransport();

@@ -5,8 +5,11 @@
  * and that inline --token=VALUE style flags are redacted in command/args.
  */
 
-import { describe, it, expect } from 'vitest';
-import { formatImportResults } from '../../src/cli/commands/import-servers.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { formatImportResults, writeBackup } from '../../src/cli/commands/import-servers.js';
 import type { ImportResult } from '../../src/cli/commands/import-servers.js';
 
 // ---------------------------------------------------------------------------
@@ -209,5 +212,54 @@ describe('B5: formatImportResults inline token flag redaction', () => {
 
     expect(summary).toContain('@modelcontextprotocol/server-filesystem');
     expect(summary).toContain('/home/user/docs');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B10: writeBackup timestamped suffix
+// ---------------------------------------------------------------------------
+
+describe('B10: writeBackup timestamped suffix', () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('backup filename contains .bak. followed by a 14-digit timestamp', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mcp-b10-test-'));
+    const src = join(tmpDir, 'settings.json');
+    writeFileSync(src, JSON.stringify({ mcpServers: {} }));
+
+    const backupPath = writeBackup(src);
+
+    // Must match .bak.YYYYMMDDHHMMSS (14 digits)
+    expect(backupPath).toMatch(/\.bak\.\d{14}$/);
+  });
+
+  it('two successive writeBackup calls produce two distinct backup files', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mcp-b10-test-'));
+    const src = join(tmpDir, 'settings.json');
+    writeFileSync(src, JSON.stringify({ mcpServers: {} }));
+
+    const first = writeBackup(src);
+    const second = writeBackup(src);
+
+    // Both paths must exist and be different.
+    expect(first).not.toBe(second);
+
+    const backups = readdirSync(tmpDir).filter((f) => f.includes('.bak.'));
+    expect(backups.length).toBe(2);
+  });
+
+  it('backup file content matches the original at backup time', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mcp-b10-test-'));
+    const src = join(tmpDir, 'config.json');
+    const content = JSON.stringify({ mcpServers: { 'test-server': { command: 'npx', args: [] } } });
+    writeFileSync(src, content);
+
+    const backupPath = writeBackup(src);
+    const backedUp = readFileSync(backupPath, 'utf-8');
+    expect(backedUp).toBe(content);
   });
 });

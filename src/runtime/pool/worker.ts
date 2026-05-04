@@ -56,7 +56,13 @@ export interface WorkerResult {
   logs: string[];
 }
 
-export type WorkerState = 'idle' | 'busy' | 'recycling' | 'dead';
+/**
+ * B7: 'starting' is added so the pool can push a replacement worker into
+ * `this.workers` synchronously before calling `replacement.start()`. While
+ * the worker is in 'starting' state it is excluded from `_findIdle()`,
+ * preventing jobs from being routed to a not-yet-ready process.
+ */
+export type WorkerState = 'starting' | 'idle' | 'busy' | 'recycling' | 'dead';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap script written to a temp file once per worker
@@ -166,7 +172,10 @@ let workerSeq = 0;
 
 export class PooledWorker {
   readonly id: string;
-  private state: WorkerState = 'idle';
+  // B7: Initial state is 'starting' (not 'idle') so that a freshly constructed
+  // replacement pushed into the pool array is invisible to _findIdle() until
+  // its start() promise resolves and transitions it to 'idle'.
+  private state: WorkerState = 'starting';
   private proc: ChildProcess | null = null;
   private bootstrapFile: string | null = null;
   private lineBuffer = '';
@@ -250,6 +259,11 @@ export class PooledWorker {
       if (t.unref) t.unref();
     });
 
+    // B7: Transition from 'starting' to 'idle' only after the subprocess is
+    // ready. The pool pushes the worker into this.workers while still in
+    // 'starting' state; _findIdle() checks for 'idle' so no jobs are routed
+    // here until this line executes.
+    this.state = 'idle';
     logger.debug('Worker started', { workerId: this.id });
   }
 

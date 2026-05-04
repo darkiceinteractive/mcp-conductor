@@ -15,7 +15,7 @@
  * @module daemon/server
  */
 
-import { createServer, type Server as NetServer, type Socket } from 'node:net';
+import { createServer, createConnection, type Server as NetServer, type Socket } from 'node:net';
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
@@ -65,10 +65,6 @@ export function loadOrCreateSecret(authPath: string): string {
   writeFileSync(authPath, JSON.stringify(content, null, 2), { mode: 0o600, encoding: 'utf-8' });
   logger.info('DaemonServer: generated new shared secret', { authPath });
   return secret;
-}
-
-function hmacToken(secret: string, nonce: string): string {
-  return createHmac('sha256', secret).update(nonce).digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +199,18 @@ export class DaemonServer {
     mkdirSync(CONDUCTOR_DIR, { recursive: true });
 
     if (existsSync(this.socketPath)) {
+      // B9: Before unlinking the socket, probe whether a daemon is already
+      // listening. An unconditional unlink would silently evict a live daemon.
+      // We attempt a connect + ping with a 200ms timeout. If the socket
+      // responds (live daemon), we refuse to start. If it is stale (no
+      // response / connection refused), we unlink and proceed.
+      const isLive = await this._probeSocketLiveness(this.socketPath, 200);
+      if (isLive) {
+        this.running = false;
+        throw new Error(
+          `DaemonServer: another daemon is already listening on ${this.socketPath}; refusing to evict`
+        );
+      }
       unlinkSync(this.socketPath);
     }
 
@@ -215,6 +223,31 @@ export class DaemonServer {
     logger.info('DaemonServer: started', {
       socketPath: this.socketPath,
       tcpPort: this.tcpPort,
+    });
+  }
+
+  /**
+   * B9: Probe whether a Unix socket at `socketPath` has a live daemon behind
+   * it. Connects, waits up to `timeoutMs` for any data (the daemon sends a
+   * nonce challenge immediately on connect), and returns true if data arrives.
+   * Returns false on connection error, timeout, or if the socket is stale.
+   */
+  private _probeSocketLiveness(socketPath: string, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        resolve(result);
+      };
+
+      const timer = setTimeout(() => finish(false), timeoutMs);
+
+      const sock = createConnection({ path: socketPath });
+      sock.once('data', () => { clearTimeout(timer); finish(true); });
+      sock.once('error', () => { clearTimeout(timer); finish(false); });
+      sock.once('close', () => { clearTimeout(timer); finish(false); });
     });
   }
 
@@ -403,7 +436,10 @@ export class DaemonServer {
       return;
     }
 
-    const expected = hmacToken(this.sharedSecret, nonce);
+    // B11: hmacToken() was previously a module-level function. Inlined here to
+    // prevent future callers from accidentally reusing it with a caller-supplied
+    // nonce outside of the auth flow.
+    const expected = createHmac('sha256', this.sharedSecret).update(nonce).digest('hex');
     const expectedBuf = Buffer.from(expected, 'utf-8');
     const providedBuf = Buffer.from(token, 'utf-8');
 
