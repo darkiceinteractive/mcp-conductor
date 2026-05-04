@@ -40,6 +40,37 @@ export interface ToolCallResponse {
     durationMs: number;
     dataSize: number;
   };
+  /**
+   * Per-call PII reverse map (X4 — Agent J).
+   * Present only when the tool's `ToolDefinition.redact.response` annotation
+   * is active. Maps `[TOKEN_N]` → original sensitive value. The sandbox
+   * accumulates this across tool calls within one `execute_code` invocation
+   * and uses it to back `mcp.detokenize()`.
+   */
+  reverseMap?: Record<string, string>;
+}
+
+/**
+ * Internal marker returned by the bridge callTool handler when X4
+ * tokenization is active. The HTTP server unwraps it so the wire format
+ * cleanly separates `result` from `reverseMap`.
+ *
+ * @internal Not part of the public API — used only between mcp-server.ts
+ *   and http-server.ts handleToolCall.
+ */
+export interface TokenizedCallResult {
+  __x4_result: unknown;
+  __x4_reverseMap: Record<string, string>;
+}
+
+/** Type guard for TokenizedCallResult */
+export function isTokenizedCallResult(v: unknown): v is TokenizedCallResult {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    '__x4_result' in v &&
+    '__x4_reverseMap' in v
+  );
 }
 
 export interface ServerInfo {
@@ -470,11 +501,23 @@ export class HttpBridge {
     const startTime = Date.now();
 
     try {
-      const result = await this.handlers.callTool(
+      const raw = await this.handlers.callTool(
         request.server,
         request.tool,
         request.params || {}
       );
+
+      // X4 tokenization: if the handler returned a TokenizedCallResult,
+      // unwrap it so `result` and `reverseMap` are separate fields on the
+      // wire response. The sandbox accumulates reverseMap across tool calls.
+      let result: unknown;
+      let reverseMap: Record<string, string> | undefined;
+      if (isTokenizedCallResult(raw)) {
+        result = raw.__x4_result;
+        reverseMap = raw.__x4_reverseMap;
+      } else {
+        result = raw;
+      }
 
       const resultStr = JSON.stringify(result);
       const response: ToolCallResponse = {
@@ -483,6 +526,7 @@ export class HttpBridge {
           durationMs: Date.now() - startTime,
           dataSize: resultStr.length,
         },
+        ...(reverseMap && Object.keys(reverseMap).length > 0 ? { reverseMap } : {}),
       };
 
       this.sendJson(res, response);

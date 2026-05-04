@@ -191,3 +191,10 @@ All 6 acceptance criteria met:
 - [x] preloadHelpers[] list accepted by worker bootstrap (Phase 5 plug-in point)
 
 ## READY-FOR-MERGE
+### Files to deliver
+- `src/server/passthrough-registrar.ts` (NEW)
+- `src/registry/built-in-recommendations.ts` (NEW)
+- `src/server/mcp-server.ts` (MODIFY — wire `registerPassthroughTools()` after `registry.refresh()`)
+- `test/unit/passthrough-registrar.test.ts` (NEW)
+
+---

@@ -83,6 +83,11 @@ const __logs: string[] = [];
 // Rate limit tracking per server
 const __rateLimits: Record<string, { detected: boolean; delayMs: number; lastError: number }> = {};
 
+// X4 PII reverse map — accumulated from tool call responses within this execution.
+// Tokens minted in a prior execute_code call are NOT present here (each call
+// gets a fresh map). Never returned to Claude — used only by mcp.detokenize().
+const __reverseMap: Record<string, string> = {};
+
 // Helper to detect if response is a rate limit error
 function __isRateLimitError(result: unknown): boolean {
   if (typeof result === 'string') {
@@ -173,6 +178,12 @@ class MCPServerClient {
 
       if (data.metrics?.dataSize) {
         __metrics.dataProcessedBytes += data.metrics.dataSize;
+      }
+
+      // X4: accumulate PII reverse map tokens from this tool call into the
+      // execution-scoped map so mcp.detokenize() can resolve them.
+      if (data.reverseMap && typeof data.reverseMap === 'object') {
+        Object.assign(__reverseMap, data.reverseMap);
       }
 
       if (data.error) {
@@ -293,6 +304,22 @@ const __mcpBase = {
     execution_id: EXECUTION_ID,
     stream_enabled: STREAM_ENABLED,
     loaded_servers: [] as string[],
+  },
+
+  /**
+   * X4 PII detokenization — recover the original sensitive value for a token
+   * minted by the hub's response tokenizer within this same execute_code call.
+   *
+   * Example:
+   *   const email = mcp.detokenize('[EMAIL_1]'); // → 'x@y.com'
+   *   await mcp.server('crm').call('lookup', { email });
+   *
+   * Returns undefined if the token was not minted in this call (e.g. it comes
+   * from a prior execute_code call — tokens do not survive call boundaries).
+   * Never call this on the final return value — Claude should see the token.
+   */
+  detokenize(token: string): string | undefined {
+    return __reverseMap[token];
   },
 
   // Skills API placeholder for MVP
