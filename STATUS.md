@@ -81,3 +81,46 @@ Registry-driven passthrough adapter ships in 4 commits:
 - [x] preloadHelpers[] list accepted by worker bootstrap (Phase 5 plug-in point)
 
 ## READY-FOR-MERGE
+# Sprint STATUS
+
+## Agent G — Phase 7: Observability + Replay
+
+### START CHECKPOINT
+- **Started:** 2026-05-04
+- **Branch:** feature/v3-phase-7
+- **Baseline:** 848 tests passing (1 skipped), 41 test files
+- **Rebased onto:** origin/feature/v3-phase-0-1 ✓
+
+### Scope
+- `src/observability/cost-predictor.ts` — rolling per-(tool, args-shape-fingerprint) history, predicts tokens/latency
+- `src/observability/hot-path.ts` — latency/volume profiler with rolling window and p99
+- `src/observability/anomaly.ts` — 3σ outlier detection per (server, tool)
+- `src/observability/replay.ts` — record/replay execute_code calls with .jsonl journals
+- `src/observability/index.ts` — barrel export
+- `src/cli/replay.ts` — CLI subcommand for replay
+- 5 new MCP tools: predict_cost, get_hot_paths, record_session, stop_recording, replay_session
+- Gateway instrumentation hooked into bridge callTool path
+
+### PROGRESS
+- [x] cost-predictor.ts — argsShapeFingerprint, CostPredictor, singleton
+- [x] hot-path.ts — HotPathProfiler, rolling window, p99, deterministic ordering
+- [x] anomaly.ts — Welford online algorithm, 3σ threshold, EventEmitter
+- [x] replay.ts — JSONL journal, record/stop/replay, 1 GB rotation, divergence detection
+- [x] observability/index.ts — barrel export
+- [x] cli/replay.ts — replay <path>, --list, --at/--op/--with flags
+- [x] mcp-server.ts integration (5 new tools: predict_cost, get_hot_paths, record_session, stop_recording, replay_session)
+- [x] gateway instrumentation in callTool (hot-path + anomaly + cost-predictor)
+- [x] test suite — 57 new tests, 905 total passing
+
+### RESULT
+READY-FOR-MERGE
+
+PR: https://github.com/darkiceinteractive/mcp-conductor/pull/5
+
+All 6 acceptance criteria met:
+- Cost predictor within 30% after 10+ samples ✓
+- Hot path deterministic ordering ✓
+- Anomaly detector catches 10× outlier ✓
+- Replay reproduces bit-identical (no mods) ✓
+- Replay with op:skip bypasses call ✓
+- Rotation at 1 GB ✓

@@ -52,6 +52,12 @@ const EXPECTED: Record<string, ToolAnnotations> = {
   add_server:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   remove_server:      { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: false },
   update_server:      { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: false },
+  // Phase 7 observability tools
+  predict_cost:       { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
+  get_hot_paths:      { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
+  record_session:     { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
+  stop_recording:     { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
+  replay_session:     { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
 };
 
 describe('Tool annotations', () => {
