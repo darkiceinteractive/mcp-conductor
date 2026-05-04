@@ -47,3 +47,7 @@ templates/
 docs/articles/
 docs/gists/
 docs/images/
+
+# v3 generated types (auto-generated from registry; do not commit)
+src/registry/types/*.d.ts
+src/registry/types/*.json
