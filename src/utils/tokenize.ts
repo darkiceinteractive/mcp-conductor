@@ -188,6 +188,14 @@ export interface TokenizeResult {
  * - If the same literal appears twice it receives the same token
  *   (idempotent within one call).
  *
+ * **Token stability — IMPORTANT (B12):** Tokens are scoped to a single call
+ * and are NOT stable across calls. `[EMAIL_1]` produced in call A may refer
+ * to a completely different email address than `[EMAIL_1]` produced in call B,
+ * because the per-label counter resets on every invocation and matching order
+ * can differ. Never store, compare, or cache tokens across `execute_code`
+ * invocations. Use the `reverseMap` returned from the same call to detokenize
+ * within that call only.
+ *
  * @param value   The data returned by an MCP tool.
  * @param matchers Array of built-in matcher names (e.g. `['email','phone']`).
  *   Unknown names are silently ignored (future-proof for inline-regex extension).
