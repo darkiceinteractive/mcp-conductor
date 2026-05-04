@@ -14,6 +14,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { EventEmitter } from 'node:events';
 import { logger, RateLimiter, minimalChildEnv } from '../utils/index.js';
+import { tokenize, type RedactMatcher } from '../utils/tokenize.js';
 import {
   loadClaudeConfig,
   findClaudeConfig,
@@ -21,6 +22,7 @@ import {
   findConductorConfig,
 } from '../config/loader.js';
 import type { ClaudeConfig, ServersConfig, ConductorConfig, RateLimitConfig } from '../config/schema.js';
+import { MCPToolError, extractErrorCode } from '../reliability/errors.js';
 
 export type ServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -674,10 +676,48 @@ export class MCPHub extends EventEmitter {
 
       return result;
     } catch (error) {
+      // Never double-wrap an MCPToolError — propagate as-is.
+      if (error instanceof MCPToolError) throw error;
+
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Tool call failed: ${serverName}.${toolName}`, { error: errorMessage, params });
-      throw new Error(`Tool call failed: ${serverName}.${toolName} - ${errorMessage}`);
+
+      const code = extractErrorCode(error);
+      throw new MCPToolError(code, serverName, toolName, error);
     }
+  }
+
+  /**
+   * Call a tool on a specific server, applying PII tokenization to the result.
+   *
+   * Used by the bridge `/call` handler when the tool's `ToolDefinition.redact.response`
+   * annotation is present. Returns both the redacted result and the per-call
+   * reverse map so the sandbox can resolve tokens via `mcp.detokenize()`.
+   *
+   * The reverse map is scoped to a single `execute_code` invocation — it is
+   * embedded in the sandbox preamble by `generateSandboxCode` and never
+   * persisted to disk or shared across calls.
+   *
+   * @param serverName  Backend server name
+   * @param toolName    Tool to invoke
+   * @param params      Tool arguments
+   * @param matchers    Built-in matcher names from `ToolDefinition.redact.response`
+   * @returns `{ result, reverseMap }` — result has PII replaced with tokens;
+   *          reverseMap maps `[TOKEN_N]` → original value.
+   */
+  async callToolTokenized(
+    serverName: string,
+    toolName: string,
+    params: Record<string, unknown>,
+    matchers: ReadonlyArray<RedactMatcher>
+  ): Promise<{ result: unknown; reverseMap: Record<string, string> }> {
+    const raw = await this.callTool(serverName, toolName, params);
+    if (matchers.length === 0) {
+      return { result: raw, reverseMap: {} };
+    }
+    const { redacted, reverseMap } = tokenize(raw, matchers);
+    logger.debug(`callToolTokenized: ${serverName}.${toolName} — ${Object.keys(reverseMap).length} token(s) minted`);
+    return { result: redacted, reverseMap };
   }
 
   /**

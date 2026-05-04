@@ -6,3 +6,4 @@
  */
 
 export * from './http-server.js';
+export * from './pool.js';

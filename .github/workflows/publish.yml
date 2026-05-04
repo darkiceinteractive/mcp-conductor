@@ -44,8 +44,31 @@ jobs:
         env:
           DENO_AVAILABLE: true
 
+      - name: Determine npm dist-tag
+        id: dist_tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # Match in order. The catch-all `*-*` arm before `*)` ensures
+          # any *unknown* prerelease label (canary, pre, dev, snapshot,
+          # next, even typos like aplha) routes to a non-`latest` dist-tag
+          # so we never silently ship an unstable build to default
+          # `npm install` consumers.
+          case "$VERSION" in
+            *-alpha*) TAG=alpha ;;
+            *-beta*)  TAG=beta ;;
+            *-rc*)    TAG=next ;;
+            *-*)      TAG=next ;;
+            *)        TAG=latest ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          case "$VERSION" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "Publishing $VERSION under dist-tag $TAG"
+
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --access public --tag ${{ steps.dist_tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -53,11 +76,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.dist_tag.outputs.prerelease == 'true' }}
           body: |
             ## Install
 
             ```bash
-            npx -y @darkiceinteractive/mcp-conductor
+            npx -y @darkiceinteractive/mcp-conductor@${{ steps.dist_tag.outputs.tag }}
             ```
 
             Build: ${{ github.run_number }}

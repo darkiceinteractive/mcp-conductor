@@ -228,6 +228,38 @@ For Claude Desktop, ensure `~/Library/Application Support/Claude/claude_desktop_
 
 ---
 
+## Claude Code Shows an Approval Prompt for MCP Conductor
+
+**Symptom:** When you add MCP Conductor via a project-level `.mcp.json` file, Claude Code shows a permission dialog:
+
+```
+MCP server "mcp-conductor" wants access. Which tools would you like to allow?
+  1. Allow this MCP server (all tools)
+  2. Choose specific tools
+  3. Deny
+```
+
+**Cause:** Claude Code enforces an approval step the first time it sees a project-level `.mcp.json` entry. This is expected behaviour — Claude Code sandboxes each project's MCP access separately.
+
+**Fix:** Select **option 1 ("Allow this MCP server")** to grant full access. MCP Conductor already enforces its own security model (Deno sandbox, network restrictions), so allowing all tools here is safe.
+
+If you want to avoid the approval prompt entirely, configure MCP Conductor in your **global** `~/.claude/settings.json` instead of a project-level `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcp-conductor": {
+      "command": "npx",
+      "args": ["-y", "@darkiceinteractive/mcp-conductor"]
+    }
+  }
+}
+```
+
+Global entries are approved once and apply to all projects without per-project prompts.
+
+---
+
 ## High Token Usage Despite Execution Mode
 
 **Symptom:** Token savings are lower than expected.

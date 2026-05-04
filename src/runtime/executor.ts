@@ -38,6 +38,18 @@ export interface ExecutionOptions {
   servers: string[];
   /** Enable streaming mode for real-time progress updates */
   stream?: boolean;
+  /**
+   * AbortSignal tied to the caller's request. When the signal fires we
+   * terminate the Deno process via the same SIGTERM→SIGKILL path used for
+   * shutdown. Surfaces MCP cancellation from the client side.
+   */
+  signal?: AbortSignal;
+  /**
+   * Caller-provided execution id. Lets the MCP server preallocate the id
+   * and subscribe to the matching ExecutionStream *before* Deno spawns, so
+   * we never miss the first progress event.
+   */
+  executionId?: string;
 }
 
 /**
@@ -70,6 +82,11 @@ const __logs: string[] = [];
 
 // Rate limit tracking per server
 const __rateLimits: Record<string, { detected: boolean; delayMs: number; lastError: number }> = {};
+
+// X4 PII reverse map — accumulated from tool call responses within this execution.
+// Tokens minted in a prior execute_code call are NOT present here (each call
+// gets a fresh map). Never returned to Claude — used only by mcp.detokenize().
+const __reverseMap: Record<string, string> = {};
 
 // Helper to detect if response is a rate limit error
 function __isRateLimitError(result: unknown): boolean {
@@ -113,6 +130,21 @@ console.log = (...args: unknown[]) => {
   }
 };
 
+// MCPToolError shim — mirrors the server-side class so instanceof checks work
+// in the sandbox without importing the server bundle.
+class MCPToolError extends Error {
+  readonly name = 'MCPToolError';
+  constructor(
+    readonly code: string,
+    readonly server: string,
+    readonly tool: string,
+    readonly upstream: unknown
+  ) {
+    super(\`[\${server}.\${tool}] \${code}\`);
+    Object.setPrototypeOf(this, MCPToolError.prototype);
+  }
+}
+
 // MCP Server Client with streaming support
 class MCPServerClient {
   constructor(public readonly name: string) {}
@@ -148,6 +180,12 @@ class MCPServerClient {
         __metrics.dataProcessedBytes += data.metrics.dataSize;
       }
 
+      // X4: accumulate PII reverse map tokens from this tool call into the
+      // execution-scoped map so mcp.detokenize() can resolve them.
+      if (data.reverseMap && typeof data.reverseMap === 'object') {
+        Object.assign(__reverseMap, data.reverseMap);
+      }
+
       if (data.error) {
         // Report tool call error when streaming
         if (STREAM_ENABLED) {
@@ -158,6 +196,19 @@ class MCPServerClient {
             durationMs,
             error: data.error.message,
           });
+        }
+        // Reconstruct MCPToolError if the bridge serialized structured fields
+        if (data.error.type === 'mcp_tool_error' && data.error.code !== undefined) {
+          // Reconstruct upstream Error if it was serialized with the __error__ sentinel (CRIT-2)
+          let upstream: unknown = data.error.upstream;
+          if (upstream && typeof upstream === 'object' && (upstream as Record<string, unknown>).__error__) {
+            const u = upstream as Record<string, unknown>;
+            const reconstructed = new Error(u.message as string);
+            reconstructed.name = u.name as string;
+            if (u.stack) reconstructed.stack = u.stack as string;
+            upstream = reconstructed;
+          }
+          throw new MCPToolError(data.error.code, data.error.server ?? this.name, data.error.tool ?? tool, upstream);
         }
         throw new Error(\`Tool error (\${this.name}.\${tool}): \${data.error.message}\`);
       }
@@ -264,6 +315,22 @@ const __mcpBase = {
     loaded_servers: [] as string[],
   },
 
+  /**
+   * X4 PII detokenization — recover the original sensitive value for a token
+   * minted by the hub's response tokenizer within this same execute_code call.
+   *
+   * Example:
+   *   const email = mcp.detokenize('[EMAIL_1]'); // → 'x@y.com'
+   *   await mcp.server('crm').call('lookup', { email });
+   *
+   * Returns undefined if the token was not minted in this call (e.g. it comes
+   * from a prior execute_code call — tokens do not survive call boundaries).
+   * Never call this on the final return value — Claude should see the token.
+   */
+  detokenize(token: string): string | undefined {
+    return __reverseMap[token];
+  },
+
   // Skills API placeholder for MVP
   skills: {
     list(): Array<{ name: string; category: string; description: string }> {
@@ -281,32 +348,51 @@ const __mcpBase = {
    * Smart batch execution with automatic rate limit detection and handling.
    * Attempts parallel execution first, falls back to sequential with delays if rate limited.
    *
-   * @param calls Array of { server, tool, params } objects
+   * Two call shapes are supported:
+   *   1. Descriptor form (rate-limit aware): \`mcp.batch([{ server, tool, params }, ...])\`
+   *   2. Callback form (composable, bypasses rate-limit detection):
+   *      \`mcp.batch([() => mcp.server('x').call('y', {}), ...])\`
+   *
+   * Mix-and-match in one call is not supported — pick a shape per call.
+   *
+   * @param calls Array of descriptors OR array of () => Promise<T>
    * @param options Optional { maxParallel, retryDelayMs }
    * @returns Array of results in same order as calls
    */
   async batch<T = unknown>(
-    calls: Array<{ server: string; tool: string; params?: Record<string, unknown> }>,
+    calls: Array<
+      | { server: string; tool: string; params?: Record<string, unknown> }
+      | (() => Promise<T>)
+    >,
     options: { maxParallel?: number; retryDelayMs?: number; forceParallel?: boolean } = {}
   ): Promise<T[]> {
-    const { maxParallel = calls.length, retryDelayMs = 1100, forceParallel = false } = options;
-    const results: T[] = new Array(calls.length);
+    // Detect callback form by inspecting the first element. The callback form
+    // bypasses rate-limit detection because we don't know which servers are
+    // being called — Promise.all is sufficient.
+    if (calls.length > 0 && typeof calls[0] === 'function') {
+      return Promise.all((calls as Array<() => Promise<T>>).map(fn => fn()));
+    }
+
+    // Descriptor form — preserves all existing behaviour (rate limits, retries).
+    const descriptorCalls = calls as Array<{ server: string; tool: string; params?: Record<string, unknown> }>;
+    const { maxParallel = descriptorCalls.length, retryDelayMs = 1100, forceParallel = false } = options;
+    const results: T[] = new Array(descriptorCalls.length);
 
     // Clear rate limit cache if forcing parallel (e.g., after API upgrade)
     if (forceParallel) {
-      for (const call of calls) {
+      for (const call of descriptorCalls) {
         delete __rateLimits[call.server];
       }
       mcp.log(\`🔄 Force parallel mode enabled - rate limit cache cleared\`);
     }
 
     // Check if any server has known rate limits
-    const hasKnownRateLimit = !forceParallel && calls.some(c => __rateLimits[c.server]?.detected);
+    const hasKnownRateLimit = !forceParallel && descriptorCalls.some(c => __rateLimits[c.server]?.detected);
 
     if (hasKnownRateLimit) {
       // Sequential with delays for rate-limited servers
-      for (let i = 0; i < calls.length; i++) {
-        const { server, tool, params = {} } = calls[i];
+      for (let i = 0; i < descriptorCalls.length; i++) {
+        const { server, tool, params = {} } = descriptorCalls[i];
         const rateLimit = __rateLimits[server];
         if (rateLimit?.detected && i > 0) {
           await __sleep(rateLimit.delayMs);
@@ -319,7 +405,7 @@ const __mcpBase = {
 
     // Try parallel execution first
     const parallelResults = await Promise.all(
-      calls.map(async ({ server, tool, params = {} }) => {
+      descriptorCalls.map(async ({ server, tool, params = {} }) => {
         const client = new MCPServerClient(server);
         return client.call(tool, params);
       })
@@ -331,12 +417,12 @@ const __mcpBase = {
       if (__isRateLimitError(parallelResults[i])) {
         rateLimitedIndices.push(i);
         // Mark this server as rate limited
-        __rateLimits[calls[i].server] = {
+        __rateLimits[descriptorCalls[i].server] = {
           detected: true,
           delayMs: retryDelayMs,
           lastError: Date.now(),
         };
-        mcp.log(\`⚠️  RATE LIMITED: \${calls[i].server} - Free tier limit hit. Retrying with delays...\`);
+        mcp.log(\`⚠️  RATE LIMITED: \${descriptorCalls[i].server} - Free tier limit hit. Retrying with delays...\`);
         mcp.log(\`💡 TIP: Upgrade your API plan for parallel execution: https://brave.com/search/api/\`);
       } else {
         results[i] = parallelResults[i] as T;
@@ -347,7 +433,7 @@ const __mcpBase = {
     if (rateLimitedIndices.length > 0) {
       for (const idx of rateLimitedIndices) {
         await __sleep(retryDelayMs);
-        const { server, tool, params = {} } = calls[idx];
+        const { server, tool, params = {} } = descriptorCalls[idx];
         const client = new MCPServerClient(server);
         results[idx] = await client.call(tool, params) as T;
       }
@@ -418,6 +504,36 @@ async function __execute() {
   ${userCode}
 }
 
+// HIGH-1: Scrub plaintext PII values from the result before returning to Claude.
+// Walks the result recursively and replaces any string value that matches a
+// known plaintext in __reverseMap back to its token form. This prevents user
+// code from leaking PII via mcp.detokenize() return values on the sandbox result.
+function __scrubResult(value: unknown): unknown {
+  // Build inverse map: plaintext → token (computed once per call)
+  const plainToToken: Record<string, string> = {};
+  for (const [token, plain] of Object.entries(__reverseMap)) {
+    plainToToken[plain] = token;
+  }
+  function walk(v: unknown): unknown {
+    if (typeof v === 'string') {
+      // Exact-match replacement: whole-field value is the plaintext
+      return Object.prototype.hasOwnProperty.call(plainToToken, v) ? plainToToken[v] : v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, vv] of Object.entries(v as Record<string, unknown>)) {
+        out[k] = walk(vv);
+      }
+      return out;
+    }
+    return v;
+  }
+  // Only scrub when there is something to scrub
+  if (Object.keys(__reverseMap).length === 0) return value;
+  return walk(value);
+}
+
 // Run and output result
 (async () => {
   try {
@@ -434,12 +550,16 @@ async function __execute() {
       await __streamEvent('/progress', { percent: 100, message: 'Execution complete' });
     }
 
+    // Scrub any plaintext PII that user code may have embedded in the result
+    // via mcp.detokenize() before sending back to Claude (HIGH-1).
+    const scrubbedResult = __scrubResult(result);
+
     // Output structured result for parent process to parse
     // When streaming, logs have already been sent in real-time, so omit them to save tokens
     console.log('__RESULT_START__');
     console.log(JSON.stringify({
       success: true,
-      result,
+      result: scrubbedResult,
       logs: STREAM_ENABLED ? [] : __logs,
       metrics: __metrics,
     }));
@@ -483,7 +603,7 @@ export class DenoExecutor {
 
   constructor(config: SandboxConfig) {
     this.config = config;
-    this.maxConcurrentProcesses = config.maxConcurrentProcesses ?? 5;
+    this.maxConcurrentProcesses = config.maxConcurrentProcesses ?? 8;
     this.maxOutputBytes = config.maxOutputBytes ?? 10 * 1024 * 1024;
     this.tempDir = join(tmpdir(), 'mcp-executor');
 
@@ -605,9 +725,20 @@ export class DenoExecutor {
    * Execute code in the Deno sandbox
    */
   async execute(code: string, options: ExecutionOptions): Promise<ExecutionResult> {
-    const executionId = generateExecutionId();
+    const executionId = options.executionId ?? generateExecutionId();
     const startTime = Date.now();
     const streamEnabled = options.stream ?? false;
+
+    // Short-circuit if the caller already cancelled before we started.
+    if (options.signal?.aborted) {
+      return {
+        executionId,
+        success: false,
+        error: { type: 'runtime', message: 'Execution cancelled before start' },
+        logs: [],
+        metrics: { executionTimeMs: 0, toolCalls: 0, dataProcessedBytes: 0, resultSizeBytes: 0 },
+      };
+    }
 
     logger.debug('Starting execution', { executionId, streamEnabled });
 
@@ -645,7 +776,13 @@ export class DenoExecutor {
     writeFileSync(tempFile, sandboxCode);
 
     try {
-      const result = await this.runDeno(tempFile, options.timeoutMs, executionId, options.bridgeUrl);
+      const result = await this.runDeno(
+        tempFile,
+        options.timeoutMs,
+        executionId,
+        options.bridgeUrl,
+        options.signal,
+      );
       return {
         ...result,
         executionId,
@@ -675,7 +812,13 @@ export class DenoExecutor {
   /**
    * Run Deno subprocess
    */
-  private runDeno(filePath: string, timeoutMs: number, executionId: string, bridgeUrl: string): Promise<ExecutionResult> {
+  private runDeno(
+    filePath: string,
+    timeoutMs: number,
+    executionId: string,
+    bridgeUrl: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionResult> {
     return new Promise((resolve) => {
       // Reject if shutting down
       if (this.isShuttingDown) {
@@ -761,6 +904,34 @@ export class DenoExecutor {
         proc.kill('SIGKILL');
       }, timeoutMs);
 
+      // Honour MCP cancellation (RequestHandlerExtra.signal). We kill the
+      // process and flag cancellation so the close handler returns the
+      // dedicated error type instead of a timeout / runtime error.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        killed = true;
+        logger.info('Execution cancelled by client', { executionId });
+        try {
+          proc.kill('SIGTERM');
+          // Escalate to SIGKILL if the process doesn't exit in the grace window.
+          setTimeout(() => {
+            if (this.activeProcesses.has(executionId)) {
+              proc.kill('SIGKILL');
+            }
+          }, LIFECYCLE_TIMEOUTS.PROCESS_FORCE_KILL_MS).unref?.();
+        } catch {
+          // Process may already be gone.
+        }
+      };
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
+
       // Bounded stdout/stderr buffering
       const stdoutChunks: Buffer[] = [];
       let stdoutLen = 0;
@@ -798,9 +969,31 @@ export class DenoExecutor {
       proc.on('close', (code) => {
         clearTimeout(timer);
         this.activeProcesses.delete(executionId);
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
 
         const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
         const stderr = Buffer.concat(stderrChunks).toString('utf-8');
+
+        if (cancelled) {
+          resolve({
+            executionId,
+            success: false,
+            error: {
+              type: 'runtime',
+              message: 'Execution cancelled by client',
+            },
+            logs: [],
+            metrics: {
+              executionTimeMs: 0,
+              toolCalls: 0,
+              dataProcessedBytes: 0,
+              resultSizeBytes: 0,
+            },
+          });
+          return;
+        }
 
         if (killed) {
           resolve({
@@ -910,6 +1103,13 @@ export class DenoExecutor {
       proc.on('error', (error) => {
         clearTimeout(timer);
         this.activeProcesses.delete(executionId);
+        // Symmetric with the close handler — without this the abort
+        // listener stays attached to the AbortSignal until the SDK GCs
+        // the request, leaking closure refs across repeated spawn
+        // failures (EAGAIN/EMFILE/ENOENT).
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
 
         // Reset deno check cache on spawn failure
         if (error.message.includes('ENOENT')) {

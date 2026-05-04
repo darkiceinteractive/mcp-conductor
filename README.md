@@ -1,6 +1,6 @@
 # MCP Conductor
 
-**97% fewer tokens. Parallel execution. One `npx` command.**
+**99.7% fewer tokens. Parallel execution. One `npx` command.**
 
 [![npm version](https://img.shields.io/npm/v/@darkiceinteractive/mcp-conductor.svg?style=flat)](https://www.npmjs.com/package/@darkiceinteractive/mcp-conductor)
 [![npm downloads](https://img.shields.io/npm/dm/@darkiceinteractive/mcp-conductor.svg?style=flat)](https://www.npmjs.com/package/@darkiceinteractive/mcp-conductor)
@@ -11,11 +11,32 @@
 MCP Conductor is a single MCP server that orchestrates all your other MCP servers through a sandboxed Deno runtime. Instead of Claude making direct tool calls (and dumping every intermediate result into your context window), Claude writes TypeScript code that runs in an isolated sandbox. Only the final result comes back.
 
 ```
-Before: 45,000 tokens → Claude context window → 45,000 tokens billed
-After:  45,000 tokens → Deno sandbox → 800 tokens → Claude context window
+Before: 153,900 tokens → Claude context window → 153,900 tokens billed
+After:  153,900 tokens → Deno sandbox → 435 tokens → Claude context window
 ```
 
-**Average measured reduction: 94.3%. Peak: 97.8%.**
+**Average measured reduction: 99.7%. Verified against Anthropic's published benchmarks.**
+
+---
+
+## What's New in v3 (beta)
+
+v3 is a ground-up registry-driven architecture. Every backend tool is described, validated, and type-generated at startup. New workstreams add production-grade reliability, caching, observability, and multi-agent coordination.
+
+| Workstream | Feature | Docs |
+|---|---|---|
+| Phase 1 | Tool Registry — schema validation, hot-reload, type generation | [architecture](./docs/v3/architecture.md) |
+| Phase 2 | Response cache — LRU + CBOR serialisation, TTL per tool | [configuration](./docs/v3/configuration.md) |
+| Phase 3 | Reliability gateway — timeout, retry, circuit breaker | [architecture](./docs/v3/architecture.md) |
+| Phase 4 | Connection pool + warm sandbox pool | [configuration](./docs/v3/configuration.md) |
+| Phase 5 | Sandbox API — `compact`, `summarize`, `findTool`, `budget` | [sandbox-api](./docs/v3/sandbox-api.md) |
+| Phase 6 | Daemon mode, shared KV store, distributed lock | [configuration](./docs/v3/configuration.md) |
+| Phase 7 | Structured observability, session replay | [architecture](./docs/v3/architecture.md) |
+| X1 | Passthrough adapter — expose backend tools directly | [recipes](./docs/v3/recipes.md) |
+| X2 | Lifecycle tools, CLI wizard | [sandbox-api](./docs/v3/sandbox-api.md) |
+| X4 | PII tokenisation, response redaction | [configuration](./docs/v3/configuration.md) |
+
+Migrating from v2? See the [migration guide](./docs/v3/migration.md).
 
 ---
 
@@ -161,11 +182,20 @@ Inside `execute_code`, you have access to the `mcp` object:
 // Call a server tool
 const result = await mcp.server('github').call('list_issues', { owner: 'org', repo: 'repo' });
 
-// Parallel execution — executes all calls simultaneously
+// Parallel execution — executes all calls simultaneously.
+// Two call shapes are supported:
+//
+//   1. Callback form (composable, no rate-limit detection):
 const [issues, files, searches] = await mcp.batch([
   () => mcp.server('github').call('list_issues', { owner: 'org', repo: 'repo' }),
   () => mcp.server('filesystem').call('list_directory', { path: '/src' }),
   () => mcp.server('brave-search').call('search', { q: 'topic', count: 5 })
+]);
+
+//   2. Descriptor form (rate-limit aware, retries on 429s):
+const [a, b] = await mcp.batch([
+  { server: 'github', tool: 'list_issues', params: { owner: 'org', repo: 'repo' } },
+  { server: 'filesystem', tool: 'list_directory', params: { path: '/src' } },
 ]);
 
 // Batch web searches (handles rate limits automatically)

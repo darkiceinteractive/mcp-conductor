@@ -27,7 +27,9 @@ import { MCPExecutorServer } from './server/index.js';
 import { loadConfig } from './config/index.js';
 import { LIFECYCLE_TIMEOUTS } from './config/defaults.js';
 import { logger } from './utils/index.js';
+import { startOrphanWatch } from './utils/orphan-watch.js';
 import { BUILD_STRING } from './version.js';
+import { ToolRegistry } from './registry/index.js';
 
 /**
  * Main entry point
@@ -47,9 +49,15 @@ async function main(): Promise<void> {
 
   // Handle shutdown gracefully with timeout guard
   let isShuttingDown = false;
+  let orphanWatch: { stop(): void } | null = null;
   const shutdown = async () => {
     if (isShuttingDown) return; // Prevent double-shutdown
     isShuttingDown = true;
+
+    // Stop the orphan watchdog first so normal SIGTERM cleanup doesn't
+    // race with an "oh no, parent is gone" false positive.
+    orphanWatch?.stop();
+    orphanWatch = null;
 
     logger.info('Shutting down...');
 
@@ -85,6 +93,20 @@ async function main(): Promise<void> {
 
   try {
     await server.start();
+
+    // Initialise the Tool Registry — single source of truth for all backend
+    // MCP tool definitions. Populated here so it is ready before any tool
+    // call is dispatched. The hub satisfies the BackendBridge interface.
+    const registry = new ToolRegistry({ bridge: server.getHub() });
+    const catalogSnapshot = await registry.refresh();
+    logger.info('ToolRegistry initialised', { toolCount: catalogSnapshot.length });
+
+    // Orphan watchdog: if the MCP client that spawned us dies, our
+    // parent PID changes (usually to 1 on POSIX). Poll for that and
+    // trigger shutdown so Deno children / bridge timers don't leak.
+    orphanWatch = startOrphanWatch({
+      onOrphaned: () => shutdown(),
+    });
 
     // Periodic memory logging for diagnostics
     const memLog = setInterval(() => {

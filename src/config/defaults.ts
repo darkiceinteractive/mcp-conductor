@@ -32,7 +32,10 @@ export const DEFAULT_CONFIG: MCPExecutorConfig = {
   sandbox: {
     maxMemoryMb: 128,
     allowedNetHosts: ['localhost'],
-    maxConcurrentProcesses: 5,
+    // Bumped from 5 → 8 in v2.0.0-alpha.2 (X3 cleanup) per IBKR-side analysis
+    // finding #5. PRD Phase 4's worker pool further parameterises this with
+    // per-server overrides and warm-pool sizing.
+    maxConcurrentProcesses: 8,
     maxOutputBytes: 10 * 1024 * 1024, // 10MB
   },
   skills: {
@@ -101,6 +104,8 @@ export const DEFAULT_CONDUCTOR_CONFIG = {
  * - `STREAM_STUCK_TTL_MS` — `StreamManager` cleanup for hung running streams
  * - `STREAM_CLEANUP_INTERVAL_MS` — `StreamManager` tick rate for the sweep
  * - `MEMORY_LOG_INTERVAL_MS` — periodic heap/RSS log from the main entry point
+ * - `BRIDGE_SESSION_TTL_MS` — HTTP bridge session idle expiry (Mcp-Session-Id)
+ * - `BRIDGE_SESSION_CLEANUP_INTERVAL_MS` — sweep cadence for expired sessions
  */
 export const LIFECYCLE_TIMEOUTS = {
   SHUTDOWN_TIMEOUT_MS: 10_000,
@@ -110,4 +115,13 @@ export const LIFECYCLE_TIMEOUTS = {
   STREAM_STUCK_TTL_MS: 15 * 60_000,
   STREAM_CLEANUP_INTERVAL_MS: 60_000,
   MEMORY_LOG_INTERVAL_MS: 60_000,
+  BRIDGE_SESSION_TTL_MS: 30 * 60_000,
+  BRIDGE_SESSION_CLEANUP_INTERVAL_MS: 5 * 60_000,
+  ORPHAN_CHECK_INTERVAL_MS: 10_000,
 } as const;
+
+/**
+ * Cap on simultaneously tracked bridge sessions. Bounded to prevent the
+ * session registry from growing unbounded if a client keeps rotating IDs.
+ */
+export const MAX_BRIDGE_SESSIONS = 1000;

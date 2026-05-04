@@ -11,6 +11,9 @@ import { logger } from '../utils/index.js';
 import { HttpBridge, type BridgeHandlers, type ServerInfo } from '../bridge/index.js';
 import { DenoExecutor, type ExecutionResult } from '../runtime/index.js';
 import { MCPHub } from '../hub/index.js';
+import { ToolRegistry } from '../registry/registry.js';
+import { applyBuiltInRecommendations } from '../registry/built-in-recommendations.js';
+import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
 import { MetricsCollector } from '../metrics/index.js';
@@ -20,6 +23,27 @@ import { shutdownModeHandler } from '../modes/index.js';
 import { shutdownSkillsEngine } from '../skills/index.js';
 import type { MCPExecutorConfig, ExecutionMode, ConductorConfig } from '../config/index.js';
 import { loadConductorConfig, saveConductorConfig, getDefaultConductorConfigPath } from '../config/index.js';
+import { VERSION } from '../version.js';
+import {
+  getCostPredictor,
+  getHotPathProfiler,
+  getAnomalyDetector,
+  getReplayRecorder,
+  shutdownCostPredictor,
+  shutdownHotPathProfiler,
+  shutdownAnomalyDetector,
+  shutdownReplayRecorder,
+} from '../observability/index.js';
+import {
+  findClaudeConfigsWithServers,
+  importServers,
+  formatImportResults,
+} from '../cli/commands/import-servers.js';
+import { exportToClaude } from '../cli/commands/export-servers.js';
+import { testServer } from '../cli/commands/test-server.js';
+import { getRoutingRecommendations } from '../cli/commands/routing.js';
+import { CacheLayer } from '../cache/index.js';
+import { ReliabilityGateway } from '../reliability/index.js';
 
 /**
  * MCP Executor Server
@@ -35,6 +59,9 @@ export class MCPExecutorServer {
   private config: MCPExecutorConfig;
   private useMockServers: boolean;
   private currentMode: ExecutionMode;
+  private registry: ToolRegistry;
+  private cache: CacheLayer;
+  private gateway: ReliabilityGateway;
 
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
@@ -58,7 +85,7 @@ export class MCPExecutorServer {
     this.server = new McpServer({
       name: 'mcp-conductor',
       title: 'MCP Conductor',
-      version: '0.1.0',
+      version: VERSION,
       websiteUrl: 'https://github.com/darkiceinteractive/mcp-conductor',
       icons: [
         {
@@ -97,6 +124,18 @@ export class MCPExecutorServer {
       maxReconnectAttempts: 3,
     });
 
+    // Initialise the ToolRegistry backed by the hub.
+    // registry.refresh() + registerPassthroughTools() are called in start()
+    // after the hub has connected, so the registry is fully populated before
+    // any passthrough tool handler can be invoked.
+    this.registry = new ToolRegistry({ bridge: this.hub });
+
+    // Initialise cache layer (three-tier: memory LRU + disk CBOR + delta).
+    this.cache = new CacheLayer({ registry: this.registry });
+
+    // Initialise reliability gateway (timeout + retry + circuit breaker).
+    this.gateway = new ReliabilityGateway({});
+
     // Set up mock servers for fallback/testing
     this.setupMockServers();
 
@@ -130,6 +169,56 @@ export class MCPExecutorServer {
   /**
    * Register all MCP tools
    */
+  /**
+   * Record metrics + shape the execute_code tool response. Extracted so the
+   * progress/cancel wiring in the handler stays readable.
+   */
+  private finaliseExecuteCodeResult(
+    result: ExecutionResult,
+    code: string,
+    servers: string[] | undefined,
+    verbose: boolean | undefined,
+  ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
+    const executionMetrics = this.metricsCollector.recordExecution({
+      executionId: result.executionId,
+      code,
+      result: result.result,
+      success: result.success,
+      durationMs: result.metrics.executionTimeMs,
+      toolCalls: result.metrics.toolCalls,
+      dataProcessedBytes: result.metrics.dataProcessedBytes,
+      resultSizeBytes: result.metrics.resultSizeBytes,
+      mode: 'execution',
+      serversUsed: servers || [],
+      errorType: result.error?.type,
+    });
+
+    this.modeHandler.recordExecutionCall(executionMetrics.estimatedTokensSaved);
+
+    const output: Record<string, unknown> = {
+      success: result.success,
+      result: result.result,
+      error: result.error,
+    };
+
+    if (verbose) {
+      output.metrics = {
+        execution_time_ms: result.metrics.executionTimeMs,
+        tool_calls: result.metrics.toolCalls,
+        data_processed_bytes: result.metrics.dataProcessedBytes,
+        result_size_bytes: result.metrics.resultSizeBytes,
+        estimated_tokens_saved: executionMetrics.estimatedTokensSaved,
+        savings_percent: executionMetrics.savingsPercent,
+      };
+      output.logs = result.logs;
+    }
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify(output) }],
+      structuredContent: output,
+    };
+  }
+
   private registerTools(): void {
     // Register execute_code tool
     this.server.registerTool(
@@ -145,6 +234,14 @@ export class MCPExecutorServer {
 **Example:** \`const files = await mcp.filesystem.call('list_directory', { path: '/src' }); return files;\`
 
 Use passthrough_call only for debugging - it has HIGH token cost.`,
+        annotations: {
+          // execute_code proxies arbitrary code that can call any backend MCP
+          // tool, so it inherits the most permissive capability surface.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {
           code: z.string().describe('TypeScript/JavaScript code to execute. Must include a return statement.'),
           servers: z.array(z.string()).optional().describe('Optional: List of MCP server names to load.'),
@@ -171,7 +268,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           logs: z.array(z.string()).optional(),
         },
       },
-      async ({ code, servers, timeout_ms, stream, verbose }) => {
+      async ({ code, servers, timeout_ms, stream, verbose }, extra) => {
         const timeoutMs = Math.min(
           timeout_ms || this.config.execution.defaultTimeoutMs,
           this.config.execution.maxTimeoutMs
@@ -183,53 +280,70 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           servers: servers || 'all',
         });
 
-        const result = await this.executor.execute(code, {
-          timeoutMs,
-          bridgeUrl: this.bridge.getUrl(),
-          servers: servers || [],
-        });
+        // If the client supplied a progressToken in _meta, forward sandbox
+        // progress() calls as MCP notifications/progress. We preallocate the
+        // execution id + stream so we never miss the first event.
+        const progressToken = extra?._meta?.progressToken;
+        const wantProgress = progressToken !== undefined;
+        const wantStream = stream || wantProgress;
+        const executionId = wantStream ? this.executor.generateExecutionId() : undefined;
+        const execStream = executionId ? this.bridge.createStream(executionId) : undefined;
 
-        // Record execution with enhanced metrics collector
-        const executionMetrics = this.metricsCollector.recordExecution({
-          executionId: result.executionId,
-          code,
-          result: result.result,
-          success: result.success,
-          durationMs: result.metrics.executionTimeMs,
-          toolCalls: result.metrics.toolCalls,
-          dataProcessedBytes: result.metrics.dataProcessedBytes,
-          resultSizeBytes: result.metrics.resultSizeBytes,
-          mode: 'execution',
-          serversUsed: servers || [],
-          errorType: result.error?.type,
-        });
-
-        // Track with mode handler
-        this.modeHandler.recordExecutionCall(executionMetrics.estimatedTokensSaved);
-
-        const output: Record<string, unknown> = {
-          success: result.success,
-          result: result.result,
-          error: result.error,
+        const forwardProgress = (percent: number, message?: string): void => {
+          if (!wantProgress || !extra?.sendNotification) return;
+          void extra
+            .sendNotification({
+              method: 'notifications/progress',
+              params: {
+                progressToken,
+                progress: percent,
+                total: 100,
+                ...(message ? { message } : {}),
+              },
+            })
+            .catch((err: unknown) => {
+              logger.debug('Failed to forward progress notification', { error: String(err) });
+            });
         };
-
-        // Only include metrics when verbose is true (saves ~150-300 tokens per response)
-        if (verbose) {
-          output.metrics = {
-            execution_time_ms: result.metrics.executionTimeMs,
-            tool_calls: result.metrics.toolCalls,
-            data_processed_bytes: result.metrics.dataProcessedBytes,
-            result_size_bytes: result.metrics.resultSizeBytes,
-            estimated_tokens_saved: executionMetrics.estimatedTokensSaved,
-            savings_percent: executionMetrics.savingsPercent,
-          };
-          output.logs = result.logs;
+        if (execStream && wantProgress) {
+          execStream.on('progress', (ev: { data: { percent: number; message?: string } }) => {
+            forwardProgress(ev.data.percent, ev.data.message);
+          });
         }
 
-        return {
-          content: [{ type: 'text', text: JSON.stringify(output) }],
-          structuredContent: output,
-        };
+        let result: ExecutionResult | undefined;
+        try {
+          result = await this.executor.execute(code, {
+            timeoutMs,
+            bridgeUrl: this.bridge.getUrl(),
+            servers: servers || [],
+            stream: wantStream,
+            signal: extra?.signal,
+            executionId,
+          });
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose);
+        } finally {
+          if (execStream) {
+            // Flip the stream out of `running` so StreamManager's normal
+            // 5/10-min cleanup applies instead of the 15-min stuck-stream
+            // sweep. Only fire complete() if we actually got a result —
+            // if execute() threw, the stream will time out via the stuck
+            // path which is the right safety net.
+            if (result) {
+              execStream.complete({
+                success: result.success,
+                result: result.result,
+                error: result.error,
+                metrics: {
+                  executionTimeMs: result.metrics.executionTimeMs,
+                  toolCalls: result.metrics.toolCalls,
+                  dataProcessedBytes: result.metrics.dataProcessedBytes,
+                },
+              });
+            }
+            execStream.removeAllListeners('progress');
+          }
+        }
       }
     );
 
@@ -239,6 +353,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'List Servers',
         description: 'List all MCP servers connected through MCP Executor.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           include_tools: z.boolean().optional().describe('If true, include list of tool names.'),
         },
@@ -300,6 +419,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Discover Tools',
         description: 'Search for available tools across all connected MCP servers.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           query: z.string().optional().describe('Search query. Matches against tool names and descriptions.'),
           server: z.string().optional().describe('Optional: limit search to a specific server.'),
@@ -391,6 +515,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Get Metrics',
         description: 'Get detailed aggregated metrics for the current session including token savings, performance, and usage patterns.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           reset: z.boolean().optional().describe('Reset metrics after returning.'),
           include_details: z.boolean().optional().describe('Include detailed breakdowns (servers, tools, recent executions).'),
@@ -510,6 +639,13 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
 - execution: All requests go through the code executor (default, maximum token savings)
 - passthrough: Direct tool calls without code execution (for debugging/comparison)
 - hybrid: Automatic selection based on task complexity`,
+        annotations: {
+          // Changes global server behaviour; future tool calls take the new path.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           mode: z.enum(['execution', 'passthrough', 'hybrid']).describe('The operation mode to switch to.'),
         },
@@ -543,6 +679,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Reload Servers',
         description: 'Reload MCP server configurations. Useful after modifying claude_desktop_config.json.',
+        annotations: {
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {},
         outputSchema: {
           added: z.array(z.string()),
@@ -574,6 +715,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       {
         title: 'Get Capabilities',
         description: 'Get detailed information about MCP Executor capabilities and configuration.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {},
         outputSchema: {
           version: z.string(),
@@ -605,7 +751,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           : { loaded: 0, categories: [] };
 
         const output = {
-          version: '0.1.0',
+          version: VERSION,
           current_mode: this.currentMode,
           features: {
             streaming: this.config.execution.streamingEnabled,
@@ -638,6 +784,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
         title: 'Compare Modes',
         description: `Analyse how a task would be handled in different modes.
 Returns estimated token usage and approach for each mode.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           task_description: z.string().describe('Description of the task to analyse.'),
           estimated_tool_calls: z.number().optional().describe('Estimated number of tool calls needed.'),
@@ -726,6 +877,14 @@ Returns estimated token usage and approach for each mode.`,
         description: `⚠️ DEBUGGING TOOL - Direct MCP tool call. HIGH TOKEN COST (10-100x vs execute_code).
 
 Only use for debugging raw tool input/output. Use execute_code for all normal operations.`,
+        annotations: {
+          // Proxies into a backend MCP server so the effect depends on the
+          // downstream tool. Conservative defaults: assume external + mutable.
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
         inputSchema: {
           server: z.string().describe('Name of the MCP server to call.'),
           tool: z.string().describe('Name of the tool to invoke.'),
@@ -884,6 +1043,11 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
         description: `Web search via Brave Search API. Uses 90% fewer tokens than native WebSearch.
 
 Routes to brave-search MCP server internally. Requires brave-search server to be configured.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: false, // Web results change between calls
+          openWorldHint: true,
+        },
         inputSchema: {
           query: z.string().describe('Search query (max 400 chars, 50 words).'),
           count: z.number().optional().describe('Number of results (1-20, default 10).'),
@@ -954,6 +1118,12 @@ Routes to brave-search MCP server internally. Requires brave-search server to be
 
 Saves the server configuration to ~/.mcp-conductor.json and triggers a reload.
 Use this to dynamically add servers without restarting Claude.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false, // Adds a new server; not destructive by itself
+          idempotentHint: false, // Re-adding the same name returns an error
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Unique server name (e.g., "github", "filesystem").'),
           command: z.string().describe('Command to run the server (e.g., "npx", "node", "python").'),
@@ -1051,6 +1221,12 @@ Use this to dynamically add servers without restarting Claude.`,
 
 Removes the server configuration from ~/.mcp-conductor.json and triggers a reload.
 Use this to dynamically remove servers without restarting Claude.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true, // Removing an already-gone server is a safe no-op
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Name of the server to remove.'),
         },
@@ -1146,6 +1322,12 @@ Use this to dynamically remove servers without restarting Claude.`,
 
 Use this to update API keys or other settings without removing and re-adding the server.
 Triggers a reload to apply changes immediately.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true, // Overwrites existing config; may disconnect/reconnect
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {
           name: z.string().describe('Name of the server to update.'),
           command: z.string().optional().describe('New command (optional, keeps existing if not provided).'),
@@ -1277,6 +1459,11 @@ Triggers a reload to apply changes immediately.`,
       {
         title: 'Get Memory Stats',
         description: 'Returns live memory usage and resource counts for the conductor process. Use this to diagnose memory issues.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         inputSchema: {},
         outputSchema: {
           heap_used_mb: z.number(),
@@ -1320,6 +1507,428 @@ Triggers a reload to apply changes immediately.`,
         };
       }
     );
+    // Register predict_cost tool
+    this.server.registerTool(
+      'predict_cost',
+      {
+        title: 'Predict Cost',
+        description: 'Predict the token cost and latency of executing code based on historical samples for similar call patterns.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          code: z.string().describe('The code whose cost you want to estimate.'),
+        },
+        outputSchema: {
+          estimatedInputTokens: z.number(),
+          estimatedOutputTokens: z.number(),
+          estimatedLatencyMs: z.number(),
+          basedOn: z.number(),
+          available: z.boolean(),
+        },
+      },
+      async ({ code }) => {
+        const predictor = getCostPredictor();
+        const prediction = predictor.predictFromCode(code);
+        const output = prediction
+          ? { ...prediction, available: true }
+          : { estimatedInputTokens: 0, estimatedOutputTokens: 0, estimatedLatencyMs: 0, basedOn: 0, available: false };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
+    // Register get_hot_paths tool
+    this.server.registerTool(
+      'get_hot_paths',
+      {
+        title: 'Get Hot Paths',
+        description: 'Return the top-K tool call paths by total latency or p99 within a rolling time window.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sinceMs: z.number().optional().describe('Only include calls made in the last N milliseconds.'),
+          topK: z.number().optional().describe('Maximum number of paths to return (default: 10).'),
+          sortBy: z.enum(['totalLatency', 'p99', 'callCount']).optional().describe('Ranking dimension (default: totalLatency).'),
+        },
+        outputSchema: {
+          paths: z.array(z.object({
+            server: z.string(),
+            tool: z.string(),
+            callCount: z.number(),
+            totalLatencyMs: z.number(),
+            meanLatencyMs: z.number(),
+            p99LatencyMs: z.number(),
+          })),
+        },
+      },
+      async ({ sinceMs, topK, sortBy }) => {
+        const profiler = getHotPathProfiler();
+        const paths = profiler.getHotPaths({
+          sinceMs,
+          topK: topK ?? 10,
+          sortBy: sortBy ?? 'totalLatency',
+        });
+        const output = { paths };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
+    // Register record_session tool
+    this.server.registerTool(
+      'record_session',
+      {
+        title: 'Record Session',
+        description: 'Start recording all tool calls in the current session to a replay journal.',
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sessionId: z.string().optional().describe('Optional session ID. A UUID is generated if omitted.'),
+        },
+        outputSchema: {
+          sessionId: z.string(),
+          recordingPath: z.string(),
+        },
+      },
+      async ({ sessionId }) => {
+        const recorder = getReplayRecorder();
+        const result = recorder.startRecording(sessionId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+          structuredContent: result,
+        };
+      }
+    );
+
+    // Register stop_recording tool
+    this.server.registerTool(
+      'stop_recording',
+      {
+        title: 'Stop Recording',
+        description: 'Stop an active recording session and finalise the replay journal.',
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sessionId: z.string().describe('Session ID returned by record_session.'),
+        },
+        outputSchema: {
+          recordingPath: z.string(),
+          eventCount: z.number(),
+        },
+      },
+      async ({ sessionId }) => {
+        const recorder = getReplayRecorder();
+        const result = recorder.stopRecording(sessionId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+          structuredContent: result,
+        };
+      }
+    );
+
+    // Register replay_session tool
+    this.server.registerTool(
+      'replay_session',
+      {
+        title: 'Replay Session',
+        description: 'Replay a recorded session, optionally applying modifications. Detects divergence when replayed result differs from recorded result.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          recordingPath: z.string().describe('Path to the .jsonl recording file.'),
+          modifications: z.array(z.object({
+            at: z.number().describe('Zero-based sequence index to target.'),
+            op: z.enum(['replace', 'skip']).describe('Operation: replace the result or skip the event.'),
+            with: z.unknown().optional().describe('Replacement value for replace operation.'),
+          })).optional().describe('Optional list of modifications to apply during replay.'),
+        },
+        outputSchema: {
+          result: z.unknown(),
+          divergence: z.object({
+            at: z.number(),
+            expected: z.unknown(),
+            actual: z.unknown(),
+          }).optional(),
+        },
+      },
+      async ({ recordingPath, modifications }) => {
+        const recorder = getReplayRecorder();
+        const { result, divergence } = recorder.replay(recordingPath, modifications ?? []);
+        const output = { result, divergence };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
+    // ------------------------------------------------------------------
+    // Lifecycle tools (Workstream X2)
+    // ------------------------------------------------------------------
+
+    // import_servers_from_claude
+    this.server.registerTool(
+      'import_servers_from_claude',
+      {
+        title: 'Import Servers from Claude',
+        description: `Import MCP servers from Claude config files into ~/.mcp-conductor.json.
+
+Reads ~/.claude/settings.json, ~/Library/Application Support/Claude/claude_desktop_config.json and other standard paths.
+Shows a diff of what will be imported. On confirm=true, copies entries into the conductor config and writes .bak backups of each source file.
+Optionally strips the imported servers from their source configs.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          confirm: z.boolean().optional().default(false).describe('Set true to actually perform the import. False (default) shows a dry-run diff.'),
+          remove_originals: z.boolean().optional().default(false).describe('After import, remove the imported servers from their source Claude config files.'),
+        },
+        outputSchema: {
+          dry_run: z.boolean(),
+          sources_found: z.number(),
+          total_imported: z.number(),
+          total_skipped: z.number(),
+          summary: z.string(),
+        },
+      },
+      async ({ confirm: doImport, remove_originals }) => {
+        const sources = findClaudeConfigsWithServers();
+        if (sources.length === 0) {
+          const output = { dry_run: !doImport, sources_found: 0, total_imported: 0, total_skipped: 0, summary: 'No Claude config files with MCP servers found.' };
+          return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+        }
+
+        // Pass removeOriginals only when actually importing (doImport=true).
+        // Even though importServers() guards the strip on !dryRun internally,
+        // being explicit here prevents accidental destruction if the function
+        // contract ever changes (HIGH-4 defense-in-depth).
+        const results = importServers({
+          yes: true,
+          removeOriginals: (remove_originals ?? false) && doImport,
+          dryRun: !doImport,
+        });
+
+        const totalImported = results.reduce((sum, r) => sum + r.imported.length, 0);
+        const totalSkipped = results.reduce((sum, r) => sum + r.skipped.length, 0);
+        const summary = formatImportResults(results, !doImport);
+
+        const output = {
+          dry_run: !doImport,
+          sources_found: sources.length,
+          total_imported: totalImported,
+          total_skipped: totalSkipped,
+          summary,
+        };
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // test_server
+    this.server.registerTool(
+      'test_server',
+      {
+        title: 'Test Server',
+        description: `Transiently connect to a named MCP server from conductor config, list its tools and measure latency.
+Does NOT persist the connection or register the server. The server must be present in ~/.mcp-conductor.json.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          name: z.string().describe('Server name in conductor config to test.'),
+          timeout_ms: z.number().optional().default(15000).describe('Connection timeout in milliseconds.'),
+        },
+        outputSchema: {
+          success: z.boolean(),
+          server_name: z.string(),
+          connected: z.boolean(),
+          tool_count: z.number(),
+          tools: z.array(z.object({ name: z.string(), description: z.string() })),
+          latency_ms: z.number(),
+          error: z.string().optional(),
+        },
+      },
+      async ({ name, timeout_ms }) => {
+        const result = await testServer({ name, timeoutMs: timeout_ms ?? 15000 });
+        const output = {
+          success: result.success,
+          server_name: result.serverName,
+          connected: result.connected,
+          tool_count: result.toolCount,
+          tools: result.tools,
+          latency_ms: result.latencyMs,
+          ...(result.error ? { error: result.error } : {}),
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // diagnose_server
+    this.server.registerTool(
+      'diagnose_server',
+      {
+        title: 'Diagnose Server',
+        description: `Diagnose a registered MCP server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state.
+Returns actionable information about why a server may be failing.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          name: z.string().describe('Server name to diagnose (must be in conductor config).'),
+        },
+        outputSchema: {
+          server_name: z.string(),
+          status: z.string(),
+          tool_count: z.number(),
+          connected_at: z.string().optional(),
+          last_error: z.string().optional(),
+          reconnect_attempts: z.number(),
+          is_connected: z.boolean(),
+          registry_state: z.object({
+            in_config: z.boolean(),
+            command: z.string().optional(),
+          }),
+          suggestions: z.array(z.string()),
+        },
+      },
+      async ({ name }) => {
+        const servers = this.hub.listServers();
+        const found = servers.find((s) => s.name === name);
+
+        const conductorConfig = loadConductorConfig();
+        const inConfig = !!(conductorConfig?.servers[name]);
+        const configEntry = conductorConfig?.servers[name];
+
+        const suggestions: string[] = [];
+        if (!found && !inConfig) {
+          suggestions.push(`Server '${name}' is not in conductor config. Add it with add_server or import_servers_from_claude.`);
+        } else if (!found) {
+          suggestions.push(`Server '${name}' is in config but not connected. Try reload_servers or restart conductor.`);
+        } else if (found.status === 'error') {
+          suggestions.push(`Server has error status: ${found.lastError ?? 'unknown'}. Check the command path and env vars.`);
+          suggestions.push('Run test_server to verify connectivity.');
+        } else if (found.status === 'disconnected') {
+          suggestions.push('Server is disconnected. Conductor will auto-reconnect; or call reload_servers.');
+        }
+
+        const output = {
+          server_name: name,
+          status: found?.status ?? 'not_registered',
+          tool_count: found?.toolCount ?? 0,
+          connected_at: found?.connectedAt?.toISOString(),
+          last_error: found?.lastError,
+          reconnect_attempts: 0, // hub does not expose per-server attempt count publicly yet
+          is_connected: found?.status === 'connected',
+          registry_state: {
+            in_config: inConfig,
+            command: configEntry?.command,
+          },
+          suggestions,
+        };
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // recommend_routing
+    this.server.registerTool(
+      'recommend_routing',
+      {
+        title: 'Recommend Routing',
+        description: `Apply the X1 routing heuristic to one or all configured servers.
+Servers whose names match lightweight-payload patterns (search, calendar, email, etc.) are recommended as "passthrough".
+All others default to "execute_code" (safe default). Use apply=true to write the hints into conductor config.`,
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          server_name: z.string().optional().describe('Analyse a single server (omit for all servers).'),
+          apply: z.boolean().optional().default(false).describe('Write routing hints to ~/.mcp-conductor.json.'),
+        },
+        outputSchema: {
+          recommendations: z.array(z.object({
+            server_name: z.string(),
+            recommendation: z.enum(['passthrough', 'execute_code']),
+            reason: z.string(),
+          })),
+          applied: z.boolean(),
+          config_path: z.string().optional(),
+        },
+      },
+      async ({ server_name, apply }) => {
+        const result = getRoutingRecommendations({ serverName: server_name, apply: apply ?? false });
+        const output = {
+          recommendations: result.recommendations,
+          applied: result.applied,
+          config_path: result.configPath,
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // export_to_claude
+    this.server.registerTool(
+      'export_to_claude',
+      {
+        title: 'Export to Claude',
+        description: `Generate a mcpServers JSON block that points Claude back at mcp-conductor stdio.
+This is the rollback path: paste the output into your Claude Desktop or Claude Code config to restore direct connectivity.
+Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers), "raw" (inner object only).`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          format: z.enum(['claude-desktop', 'claude-code', 'raw']).optional().default('claude-desktop').describe('Output format.'),
+          conductor_path: z.string().optional().describe('Override the conductor binary path (default: npx @darkiceinteractive/mcp-conductor).'),
+        },
+        outputSchema: {
+          json: z.string(),
+          format: z.string(),
+          server_count: z.number(),
+          instructions: z.string(),
+        },
+      },
+      async ({ format, conductor_path }) => {
+        const result = exportToClaude({ format: format ?? 'claude-desktop', conductorPath: conductor_path });
+        const instructions = format === 'claude-code'
+          ? 'Merge this into ~/.claude/settings.json under the mcpServers key.'
+          : format === 'raw'
+          ? 'Add these entries under the mcpServers key in your Claude config.'
+          : 'Merge this into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or equivalent.';
+        const output = { json: result.json, format: result.format, server_count: result.serverCount, instructions };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
   }
 
   /**
@@ -1335,6 +1944,16 @@ Triggers a reload to apply changes immediately.`,
         connected: stats.connected,
         total: stats.total,
       });
+
+      // Populate the registry from the now-connected hub, apply built-in
+      // routing recommendations for known servers, then register all
+      // `routing: "passthrough"` tools as first-class MCP tools.
+      await this.registry.refresh();
+      applyBuiltInRecommendations(
+        this.registry.getAllTools(),
+        (server, name, meta) => this.registry.annotate(server, name, meta)
+      );
+      registerPassthroughTools(this.registry, this.server as unknown as import('./passthrough-registrar.js').McpServerLike, this.hub);
     }
 
     // Set up bridge handlers
@@ -1370,8 +1989,81 @@ Triggers a reload to apply changes immediately.`,
 
           throw new Error(`Unknown tool: ${serverName}.${toolName}`);
         } else {
-          // Use real hub for tool calls
-          return await this.hub.callTool(serverName, toolName, params);
+          // Check registry for X4 redact annotation on this tool
+          const toolDef = this.registry.getTool(serverName, toolName);
+          const matchers = toolDef?.redact?.response ?? [];
+
+          // X4 tokenization path: PII-redacted results use per-call nonces so
+          // caching would store tokenized values that cannot be reverse-mapped
+          // after a cache eviction. Skip cache for this path.
+          if (matchers.length > 0) {
+            const _obsStart = Date.now();
+            const { result, reverseMap } = await this.hub.callToolTokenized(
+              serverName,
+              toolName,
+              params,
+              matchers
+            );
+            const _obsLatency = Date.now() - _obsStart;
+            const _obsResultStr = JSON.stringify(result ?? '');
+            getHotPathProfiler().record(serverName, toolName, _obsLatency);
+            getAnomalyDetector().record(serverName, toolName, _obsLatency, _obsResultStr.length);
+            getCostPredictor().record(serverName, toolName, params as Record<string, unknown>, {
+              outputText: _obsResultStr,
+              latencyMs: _obsLatency,
+            });
+            // Return TokenizedCallResult sentinel — http-server.ts unwraps it
+            return { __x4_result: result, __x4_reverseMap: reverseMap };
+          }
+
+          // Standard path: cache check → reliability gateway → backend → cache set.
+          const cacheable = this.cache.wouldCache(serverName, toolName);
+
+          if (cacheable) {
+            const hit = await this.cache.get(serverName, toolName, params);
+            if (hit) {
+              if (!hit.needsRevalidation) {
+                // Fresh cache hit — return immediately
+                return hit.value;
+              }
+              // Stale-while-revalidate: return stale value, kick off background refresh
+              this.cache.refreshInBackground(serverName, toolName, params, () =>
+                this.gateway.call(serverName, toolName, () =>
+                  this.hub.callTool(serverName, toolName, params)
+                )
+              ).catch((err) =>
+                logger.warn('SWR background refresh failed', {
+                  serverName,
+                  toolName,
+                  err: String(err),
+                })
+              );
+              return hit.value;
+            }
+          }
+
+          // Cache miss (or non-cacheable): call through reliability gateway
+          const _obsStart = Date.now();
+          const _obsResult = await this.gateway.call(serverName, toolName, () =>
+            this.hub.callTool(serverName, toolName, params)
+          );
+          const _obsLatency = Date.now() - _obsStart;
+          const _obsResultStr = JSON.stringify(_obsResult ?? '');
+
+          // Feed observability singletons
+          getHotPathProfiler().record(serverName, toolName, _obsLatency);
+          getAnomalyDetector().record(serverName, toolName, _obsLatency, _obsResultStr.length);
+          getCostPredictor().record(serverName, toolName, params as Record<string, unknown>, {
+            outputText: _obsResultStr,
+            latencyMs: _obsLatency,
+          });
+
+          // Populate cache for future calls
+          if (cacheable) {
+            await this.cache.set(serverName, toolName, params, _obsResult);
+          }
+
+          return _obsResult;
         }
       },
 
@@ -1456,11 +2148,18 @@ Triggers a reload to apply changes immediately.`,
       await this.hub.shutdown();
     }
 
-    // 3. Shutdown global singletons (intervals, listeners, caches)
+    // 3. Destroy cache layer (unsubscribes registry watcher)
+    this.cache.destroy();
+
+    // 4. Shutdown global singletons (intervals, listeners, caches)
     shutdownStreamManager();
     shutdownMetricsCollector();
     shutdownModeHandler();
     shutdownSkillsEngine();
+    shutdownCostPredictor();
+    shutdownHotPathProfiler();
+    shutdownAnomalyDetector();
+    shutdownReplayRecorder();
 
     // 4. Stop HTTP bridge last (Deno processes may still be calling it during cleanup)
     await this.bridge.stop();
