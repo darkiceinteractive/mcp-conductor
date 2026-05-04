@@ -11,6 +11,152 @@ import { dirname, join } from 'node:path';
 import { logger } from '../utils/index.js';
 import type { MetricsConfig } from '../config/index.js';
 
+// ─── Token Savings constants (public, shared with fixtures and benchmarks) ────
+
+/** Per-call overhead tokens (request + response envelope) */
+export const TOOL_CALL_OVERHEAD_TOKENS = 150;
+
+/** Tokens per KB of raw passthrough data (~4 bytes per token) */
+export const TOKENS_PER_KB = 256;
+
+/** Characters per token for TypeScript/JavaScript code */
+export const CODE_CHARS_PER_TOKEN = 3.5;
+
+/** Characters per token for JSON result payloads */
+export const JSON_CHARS_PER_TOKEN = 3.8;
+
+// ─── TokenSavings types ───────────────────────────────────────────────────────
+
+/**
+ * Input parameters for the token savings computation.
+ * All four values must come from the same execute_code call.
+ */
+export interface TokenSavingsInput {
+  /** Number of MCP tool calls made inside the sandbox */
+  toolCalls: number;
+  /** Total bytes of raw data processed (would be in context in passthrough) */
+  dataProcessedBytes: number;
+  /** Character count of the user code submitted to execute_code */
+  codeChars: number;
+  /** Byte length of the JSON-serialised result returned from the sandbox */
+  resultBytes: number;
+}
+
+/**
+ * Token savings block returned by computeTokenSavings() and attached to
+ * execute_code responses when show_token_savings is true.
+ */
+export interface TokenSavings {
+  /** Estimated tokens if every tool call result had been placed in context */
+  estimatedPassthroughTokens: number;
+  /** Actual tokens consumed by execution mode (code + result) */
+  actualExecutionTokens: number;
+  /** Tokens saved: passthrough - execution (clamped to >= 0) */
+  tokensSaved: number;
+  /** Percentage savings, rounded to one decimal place */
+  savingsPercent: number;
+  /**
+   * Human-readable note. Populated for passthrough-mode tools to signal
+   * the savings estimate is not applicable.
+   */
+  note?: string;
+}
+
+/**
+ * Per-tool aggregation bucket used by the session-level reporter.
+ * @internal
+ */
+export interface ToolSavingsBucket {
+  server: string;
+  tool: string;
+  calls: number;
+  totalActualTokens: number;
+  totalEstimatedPassthroughTokens: number;
+  isPassthrough: boolean;
+}
+
+/**
+ * Session-level token savings block returned by getTokenSavings().
+ */
+export interface SessionTokenSavings {
+  /** Total actual tokens across all execute_code calls this session */
+  sessionActual: number;
+  /** Total estimated passthrough tokens across all calls this session */
+  sessionEstimatedDirect: number;
+  /** Overall savings percentage this session */
+  sessionSavingsPercent: number;
+  /** Per-tool breakdown (server x tool) */
+  perTool: Array<{
+    server: string;
+    tool: string;
+    calls: number;
+    actualTokens: number;
+    estimatedPassthroughTokens: number;
+    savingsPercent: number;
+    note?: string;
+  }>;
+}
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Compute token savings for a single execute_code invocation.
+ *
+ * This is a **pure function** — it does not mutate any collector state and can
+ * be called independently without an active MetricsCollector instance.
+ *
+ * Formula (mirrors MetricsCollector.estimatePassthroughTokens / calculateTokenSavings):
+ *   passthroughTokens = (toolCalls x 150) + (dataProcessedBytes / 1024 x 256)
+ *   executionTokens   = ceil(codeChars / 3.5) + ceil(resultBytes / 3.8)
+ *
+ * Caveats:
+ *   - 256 tokens/KB is an observed average; actual tokeniser output varies.
+ *   - Per-call overhead (150 tokens) dominates for tiny responses; savings may
+ *     appear negative when overhead > data tokens. tokensSaved is clamped to 0.
+ *   - For passthrough-mode tools set toolCalls=0, dataProcessedBytes=0;
+ *     the note field will indicate savings are not applicable.
+ *   - For mutation tools (write, upsert) the number is informational only.
+ *
+ * @param input - The four metrics from an execute_code call
+ * @returns A TokenSavings block suitable for embedding in a tool response
+ */
+export function computeTokenSavings(input: TokenSavingsInput): TokenSavings {
+  const { toolCalls, dataProcessedBytes, codeChars, resultBytes } = input;
+
+  const estimatedPassthroughTokens = Math.ceil(
+    toolCalls * TOOL_CALL_OVERHEAD_TOKENS + (dataProcessedBytes / 1024) * TOKENS_PER_KB,
+  );
+
+  const actualExecutionTokens =
+    Math.ceil(codeChars / CODE_CHARS_PER_TOKEN) +
+    Math.ceil(resultBytes / JSON_CHARS_PER_TOKEN);
+
+  const tokensSaved = Math.max(0, estimatedPassthroughTokens - actualExecutionTokens);
+
+  const savingsPercent =
+    estimatedPassthroughTokens > 0
+      ? Math.round((tokensSaved / estimatedPassthroughTokens) * 1000) / 10
+      : 0;
+
+  // Passthrough-mode tool: no tool calls and no data — savings not applicable.
+  if (toolCalls === 0 && dataProcessedBytes === 0) {
+    return {
+      estimatedPassthroughTokens,
+      actualExecutionTokens,
+      tokensSaved: 0,
+      savingsPercent: 0,
+      note: 'This tool is passthrough — execute_code routing not applicable.',
+    };
+  }
+
+  return {
+    estimatedPassthroughTokens,
+    actualExecutionTokens,
+    tokensSaved,
+    savingsPercent,
+  };
+}
+
 /**
  * Token estimation configuration for different content types
  */
@@ -118,6 +264,8 @@ export class MetricsCollector extends EventEmitter {
   private executions: ExecutionMetrics[] = [];
   private maxStoredExecutions = 100;
   private logPath: string | null = null;
+  /** Per-tool aggregation for the token savings reporter (Mode B). */
+  private toolSavingsBuckets: Map<string, ToolSavingsBucket> = new Map();
 
   constructor(config: MetricsConfig, estimationConfig?: Partial<TokenEstimationConfig>) {
     super();
@@ -589,6 +737,102 @@ export class MetricsCollector extends EventEmitter {
     this.sessionStart = new Date();
     this.executions = [];
     this.emit('reset');
+  }
+
+  /**
+   * Record a single MCP tool call for per-tool savings aggregation (Mode B).
+   *
+   * Call this once per tool call that passes through the hub. The server and
+   * tool names form the bucket key; responseBytes is the raw JSON response size
+   * that would have been placed in the context window in passthrough mode.
+   *
+   * @param server        - MCP server name (e.g. "google-drive")
+   * @param tool          - Tool name (e.g. "export_file")
+   * @param responseBytes - Byte length of the tool response payload
+   * @param isPassthrough - True when this server/tool routes as passthrough
+   */
+  recordToolCall(
+    server: string,
+    tool: string,
+    responseBytes: number,
+    isPassthrough: boolean,
+  ): void {
+    const key = `${server}::${tool}`;
+    const existing = this.toolSavingsBuckets.get(key);
+
+    // Compute the per-call token cost for this tool call in each mode.
+    const passthroughTokens = Math.ceil(
+      TOOL_CALL_OVERHEAD_TOKENS + (responseBytes / 1024) * TOKENS_PER_KB,
+    );
+    // Execution mode has no per-call cost for individual tools — the overhead
+    // is already captured in the code+result tokens of the execute_code call.
+    // We record 0 so the per-tool diff correctly reflects passthrough cost.
+    const executionTokens = 0;
+
+    if (existing) {
+      existing.calls += 1;
+      existing.totalEstimatedPassthroughTokens += passthroughTokens;
+      existing.totalActualTokens += executionTokens;
+    } else {
+      this.toolSavingsBuckets.set(key, {
+        server,
+        tool,
+        calls: 1,
+        totalEstimatedPassthroughTokens: passthroughTokens,
+        totalActualTokens: executionTokens,
+        isPassthrough,
+      });
+    }
+  }
+
+  /**
+   * Return the session-level token savings block for the get_metrics reporter
+   * (Mode B). Aggregates across all recordExecution() calls.
+   *
+   * The session totals are derived from the existing executions array (which
+   * already tracks estimatedTokensSaved and the direct-mode estimate) so they
+   * are always consistent with getSessionMetrics().
+   */
+  getTokenSavings(): SessionTokenSavings {
+    const sessionMetrics = this.getSessionMetrics();
+
+    const sessionActual =
+      sessionMetrics.totalCodeTokens + sessionMetrics.totalResultTokens;
+    const sessionEstimatedDirect = sessionMetrics.totalEstimatedDirectTokens;
+    const totalSaved = Math.max(0, sessionEstimatedDirect - sessionActual);
+    const sessionSavingsPercent =
+      sessionEstimatedDirect > 0
+        ? Math.round((totalSaved / sessionEstimatedDirect) * 1000) / 10
+        : 0;
+
+    const perTool = Array.from(this.toolSavingsBuckets.values()).map((bucket) => {
+      const saved = Math.max(
+        0,
+        bucket.totalEstimatedPassthroughTokens - bucket.totalActualTokens,
+      );
+      const pct =
+        bucket.totalEstimatedPassthroughTokens > 0
+          ? Math.round((saved / bucket.totalEstimatedPassthroughTokens) * 1000) / 10
+          : 0;
+      return {
+        server: bucket.server,
+        tool: bucket.tool,
+        calls: bucket.calls,
+        actualTokens: bucket.totalActualTokens,
+        estimatedPassthroughTokens: bucket.totalEstimatedPassthroughTokens,
+        savingsPercent: pct,
+        ...(bucket.isPassthrough
+          ? { note: 'This tool is passthrough — execute_code routing not applicable.' }
+          : {}),
+      };
+    });
+
+    return {
+      sessionActual,
+      sessionEstimatedDirect,
+      sessionSavingsPercent,
+      perTool,
+    };
   }
 
   /**
