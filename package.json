@@ -1,6 +1,6 @@
 {
   "name": "@darkiceinteractive/mcp-conductor",
-  "version": "3.0.0-beta.1",
+  "version": "3.0.0-beta.2",
   "description": "MCP server that orchestrates code execution in a sandboxed Deno environment with access to all MCP servers",
   "type": "module",
   "main": "dist/index.js",
