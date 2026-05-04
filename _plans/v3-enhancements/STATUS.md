@@ -45,7 +45,24 @@ _(awaiting agent)_
 ## Agent C — PRD Phase 3 Reliability gateway + MCPToolError
 **Branch**: `feature/v3-phase-3` · **Worktree**: `C-phase-3/` · **Blocked by**: A's Phase 0
 
-_(awaiting agent)_
+[2026-05-04 16:10 AEDT] START — worktree verified (feature/v3-phase-3), rebase onto origin/feature/v3-phase-0-1 clean, baseline 848 tests pass.
+  Reading kickoff doc + PRD §5 Phase 3 (lines 542–684) + amendment MCPToolError.
+  Beginning implementation of src/reliability/ — profile → breaker → retry → timeout → gateway → errors → hub wiring → sandbox shim.
+
+[2026-05-04 16:20 AEDT] ✓ All Phase 3 acceptance criteria met.
+  ✓ ReliabilityProfile + DEFAULT_PROFILE + resolveProfile() + isMutation() + applyMutationDefault()
+  ✓ MCPToolError, TimeoutError, RetryExhaustedError, CircuitOpenError (instanceof-safe, structured fields)
+  ✓ CircuitBreaker — rolling window, closed/open/half-open, single-probe constraint
+  ✓ withRetry() — exponential backoff, retryable detection, injectable sleep
+  ✓ withTimeout() / withTimeoutSimple() — Promise.race + AbortSignal, no timer leaks
+  ✓ ReliabilityGateway — composed pipeline, 4-layer profile resolution, mutation default, stats
+  ✓ hub callTool re-throws as MCPToolError; never double-wraps
+  ✓ Sandbox MCPToolError shim — instanceof works across Deno/Node; bridge serializes structured fields
+  ✓ 36 new unit tests; 884 total (848 + 36), 1 skipped
+  ✓ IBKR hang fixture: 100ms budget, terminates < 500ms
+  ✓ Mutations no-retry: 1 call only when retries not explicitly overridden
+  Commits: b101059 profile+errors, 8398d07 breaker, bd26c20 retry, 1d7f934 timeout, 6f91616 gateway, 796b60f hub, b780e97 sandbox
+  READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/7
 
 ---
 
