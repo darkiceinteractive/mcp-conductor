@@ -281,6 +281,68 @@ describe('Full Flow Integration', () => {
       });
       expect(result.metrics.toolCalls).toBe(2);
     });
+
+    it('mcp.batch accepts callback form: [() => mcp.server(x).call(y, {})]', async () => {
+      if (!denoAvailable) {
+        console.log('Skipping integration test: Deno not available');
+        return;
+      }
+
+      // Callback form: each element is a thunk (() => Promise<T>).
+      // Results must arrive in the same order as the calls array.
+      const code = `
+        const results = await mcp.batch([
+          () => mcp.server('echo').call('reverse', { message: 'abc' }),
+          () => mcp.server('math').call('add', { a: 3, b: 7 }),
+          () => mcp.server('echo').call('uppercase', { message: 'hello' }),
+        ]);
+        return results;
+      `;
+
+      const result = await executor.execute(code, {
+        timeoutMs: 15000,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
+        servers: ['echo', 'math'],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual([
+        { reversed: 'cba' },
+        { result: 10 },
+        { result: 'HELLO' },
+      ]);
+    });
+
+    it('mcp.batch accepts descriptor form: [{server, tool, params}]', async () => {
+      if (!denoAvailable) {
+        console.log('Skipping integration test: Deno not available');
+        return;
+      }
+
+      // Descriptor form: each element is { server, tool, params }.
+      // Results must arrive in the same order as the descriptors array.
+      const code = `
+        const results = await mcp.batch([
+          { server: 'math', tool: 'multiply', params: { a: 4, b: 5 } },
+          { server: 'echo', tool: 'reverse',  params: { message: 'xyz' } },
+          { server: 'math', tool: 'add',      params: { a: 1, b: 2 } },
+        ]);
+        return results;
+      `;
+
+      const result = await executor.execute(code, {
+        timeoutMs: 15000,
+        bridgeUrl: `http://127.0.0.1:${BRIDGE_PORT}`,
+        servers: ['echo', 'math'],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual([
+        { result: 20 },
+        { reversed: 'zyx' },
+        { result: 3 },
+      ]);
+    });
   });
 
   describe('Bridge health and discovery', () => {

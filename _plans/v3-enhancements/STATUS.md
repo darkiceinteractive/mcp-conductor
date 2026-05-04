@@ -10,7 +10,9 @@ Format per checkpoint:
 ## Agent A — PRD Phase 0 + Phase 1 + finish X3 leftovers
 **Branch**: `feature/v3-phase-0-1` · **Worktree**: `mcp-executor-darkice-worktrees/A-phase-0-1/`
 
-_(awaiting agent)_
+[2026-05-04 15:33 AEDT] START — worktree verified, kickoff doc read, PRD read, consolidated plan read.
+  Baseline: e8bf3b8 docs(v3) on feature/v3-phase-0-1.
+  Beginning Block 1: wiki note + mcp.batch integration tests.
 
 ---
 
