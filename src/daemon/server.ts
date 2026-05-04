@@ -15,7 +15,7 @@
  * @module daemon/server
  */
 
-import { createServer, type Server as NetServer, type Socket } from 'node:net';
+import { createServer, createConnection, type Server as NetServer, type Socket } from 'node:net';
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
@@ -203,6 +203,18 @@ export class DaemonServer {
     mkdirSync(CONDUCTOR_DIR, { recursive: true });
 
     if (existsSync(this.socketPath)) {
+      // B9: Before unlinking the socket, probe whether a daemon is already
+      // listening. An unconditional unlink would silently evict a live daemon.
+      // We attempt a connect + ping with a 200ms timeout. If the socket
+      // responds (live daemon), we refuse to start. If it is stale (no
+      // response / connection refused), we unlink and proceed.
+      const isLive = await this._probeSocketLiveness(this.socketPath, 200);
+      if (isLive) {
+        this.running = false;
+        throw new Error(
+          `DaemonServer: another daemon is already listening on ${this.socketPath}; refusing to evict`
+        );
+      }
       unlinkSync(this.socketPath);
     }
 
@@ -215,6 +227,31 @@ export class DaemonServer {
     logger.info('DaemonServer: started', {
       socketPath: this.socketPath,
       tcpPort: this.tcpPort,
+    });
+  }
+
+  /**
+   * B9: Probe whether a Unix socket at `socketPath` has a live daemon behind
+   * it. Connects, waits up to `timeoutMs` for any data (the daemon sends a
+   * nonce challenge immediately on connect), and returns true if data arrives.
+   * Returns false on connection error, timeout, or if the socket is stale.
+   */
+  private _probeSocketLiveness(socketPath: string, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        resolve(result);
+      };
+
+      const timer = setTimeout(() => finish(false), timeoutMs);
+
+      const sock = createConnection({ path: socketPath });
+      sock.once('data', () => { clearTimeout(timer); finish(true); });
+      sock.once('error', () => { clearTimeout(timer); finish(false); });
+      sock.once('close', () => { clearTimeout(timer); finish(false); });
     });
   }
 
