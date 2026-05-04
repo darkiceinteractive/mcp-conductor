@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
+        # Node 18 dropped in v3.0.0 (EOL April 2025). Node 18's older undici
+        # fails the bridge-security DNS-rebinding tests with UND_ERR_SOCKET.
+        node-version: [20.x, 22.x]
 
     steps:
       - uses: actions/checkout@v4
