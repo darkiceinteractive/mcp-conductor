@@ -80,6 +80,62 @@ export function buildPassthroughToolName(server: string, tool: string): string {
 }
 
 /**
+ * Heuristic infer of MCP ToolAnnotations from a tool's name (HIGH-4 fix).
+ *
+ * MCP tool names overwhelmingly put verbs as prefixes (`delete_repository`,
+ * `read_file`, `list_issues`). The matcher is therefore prefix-based with a
+ * small suffix safety net for less-common name styles.
+ *
+ * Pattern groups (case-insensitive):
+ *   - **destructive** verbs that mutate or remove state. Prefix:
+ *     `delete_`, `remove_`, `create_`, `update_`, `send_`, `post_`, `put_`,
+ *     `patch_`, `drop_`, `kill_`, `terminate_`, `revoke_`, `destroy_`,
+ *     `set_`, `activate_`, `deactivate_`, `enable_`, `disable_`, `cancel_`.
+ *     Suffix safety net: `_delete`, `_remove`, `_destroy`.
+ *     → `{ readOnlyHint: false, destructiveHint: true, idempotentHint: false }`
+ *   - **mutating but recoverable** verbs (write/save/upload):
+ *     Prefix `save_`, `write_`, `upload_`; suffix `_save`, `_write`, `_upload`.
+ *     → `{ readOnlyHint: false, destructiveHint: false, idempotentHint: false }`
+ *   - **read-safe** (default): `get_`, `list_`, `search_`, `query_`, `read_`,
+ *     `fetch_`, `find_`, `count_`, `check_`, plus everything that doesn't
+ *     match the above.
+ *     → `{ readOnlyHint: true, destructiveHint: false, idempotentHint: true }`
+ *
+ * `openWorldHint` defaults to `false` for all (passthrough tools are bounded
+ * by the upstream MCP server's tool surface).
+ *
+ * False negatives (a non-obvious destructive name marked safe) require an
+ * explicit upstream annotation; the deferred Phase-1 typegen extension will
+ * close that gap by carrying upstream annotations through `ToolDefinition`.
+ */
+export function inferAnnotationsFromName(toolName: string): {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+} {
+  const name = toolName.toLowerCase();
+
+  // Destructive: mutate or remove
+  const destructivePrefix =
+    /^(delete_|remove_|create_|update_|send_|post_|put_|patch_|drop_|kill_|terminate_|revoke_|destroy_|set_|activate_|deactivate_|enable_|disable_|cancel_)/;
+  const destructiveSuffix = /(_delete|_remove|_destroy)$/;
+  if (destructivePrefix.test(name) || destructiveSuffix.test(name)) {
+    return { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+  }
+
+  // Mutating but not destructive
+  const mutatingPrefix = /^(save_|write_|upload_)/;
+  const mutatingSuffix = /(_save|_write|_upload)$/;
+  if (mutatingPrefix.test(name) || mutatingSuffix.test(name)) {
+    return { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+  }
+
+  // Default: read-safe
+  return { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+}
+
+/**
  * Conductor built-in tool names that are always registered by
  * `MCPExecutorServer.registerTools()`. Any passthrough tool whose composed
  * name matches one of these entries will be skipped to prevent duplicate-
@@ -176,16 +232,14 @@ export function registerPassthroughTools(
       }
     }
 
-    // Apply conservative read-safe annotations.
-    // The registry does not yet carry upstream MCP ToolAnnotations (that is
-    // Phase 1 typegen territory). When Agent A's typegen lands and adds those
-    // fields to ToolDefinition, extend this block to read them directly.
-    const annotations = {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    };
+    // Derive annotations from tool name pattern (HIGH-4 safety fix).
+    // The registry does not yet carry upstream MCP ToolAnnotations (deferred to
+    // a Phase 1 typegen extension), so name-pattern heuristics are the conservative
+    // middle ground: destructive-looking names are flagged so Claude can reason
+    // about safety. False negatives (a non-obvious destructive name registered as
+    // safe) require an explicit upstream annotation; the deferred typegen will
+    // close that gap.
+    const annotations = inferAnnotationsFromName(tool.name);
 
     // Capture loop variables for the async handler closure.
     const toolServer = tool.server;
