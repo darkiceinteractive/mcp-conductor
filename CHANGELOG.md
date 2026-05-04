@@ -37,6 +37,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
   - New scripts: `npm run build:articles`, `npm run build:articles:watch`
   - Sample article at `articles/_sample/` proves the pipeline works
 
+### Fixed
+
+- **Hardening cleanup cluster (B6 + B7 + B8 + B9 + B10 + B11 + B12)**:
+  - B6: Passthrough tool registration completes before SDK transport connects (no race window). `_passthroughRegistrationComplete` flag asserted in `start()` immediately before `server.connect(transport)`. JSDoc for `finaliseExecuteCodeResult` and `registerTools` corrected (were swapped).
+  - B7: Worker pool recycle pushes replacement synchronously in `'starting'` state; `_findIdle()` skips it until `start()` resolves and transitions state to `'idle'`, closing the two-entry-per-slot window. `'starting'` added to `WorkerState` and `RecycleCandidate.state`.
+  - B8: HTTP bridge `Access-Control-Allow-Origin` hardcoded to `http://127.0.0.1:<port>`; no longer echoes the validated Origin header, preventing a future `credentials: 'include'` from enabling cross-origin cookie theft.
+  - B9: Daemon probes existing socket for liveness (200ms timeout) before unlinking; throws `'refusing to evict'` if a live daemon responds, preserving the running daemon.
+  - B10: `writeBackup()` uses `.bak.YYYYMMDDHHMMSS` timestamped suffix; sub-second collisions get a 4-char hex salt. Previously `.bak` was silently overwritten on every import run.
+  - B11: `hmacToken()` scope moved from module-level into `handleAuth()` (inlined). Prevents future misuse with a caller-supplied nonce outside the auth flow. Pure refactor — no behaviour change.
+  - B12: JSDoc on `tokenize()` now explicitly documents that tokens are NOT stable across calls — `[EMAIL_1]` in call A may refer to a different value than `[EMAIL_1]` in call B.
+
 ---
 
 ## [3.0.0-beta.2] - 2026-05-04
