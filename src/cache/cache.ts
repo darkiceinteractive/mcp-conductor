@@ -39,6 +39,8 @@ export class CacheLayer {
   private unsubscribe: (() => void) | null = null;
   private diskMisses = 0;
   private ttlMap = new Map<string, number>();
+  /** Keys currently being background-revalidated; prevents SWR thundering herd. */
+  private revalidating = new Set<string>();
 
   constructor(options: CacheLayerOptions) {
     this.options = {
@@ -86,7 +88,9 @@ export class CacheLayer {
         return { ...memHit, staleness: now - memHit.storedAt };
       }
       if (this.options.staleWhileRevalidate) {
-        return { ...memHit, staleness: now - memHit.storedAt, needsRevalidation: true };
+        // Suppress duplicate SWR triggers: if already revalidating, return stale without the flag
+        const needsRevalidation = !this.revalidating.has(keyStr);
+        return { ...memHit, staleness: now - memHit.storedAt, needsRevalidation };
       }
       this.lru.delete(keyStr);
       // fall through to disk
@@ -110,12 +114,14 @@ export class CacheLayer {
         const remaining = Math.max(1, entryTtl);
         this.lru.set(keyStr, diskHit.value, remaining);
         this.ttlMap.set(keyStr, entryTtl);
+        // Suppress duplicate SWR triggers: if already revalidating, return stale without the flag
+        const needsRevalidation = !this.revalidating.has(keyStr);
         return {
           value: diskHit.value,
           storedAt: diskHit.storedAt,
           source: 'disk',
           staleness,
-          needsRevalidation: true,
+          needsRevalidation,
         };
       }
 
@@ -187,6 +193,50 @@ export class CacheLayer {
   wouldCache(server: string, tool: string): boolean {
     const toolDef = this.registry.getTool(server, tool);
     return isCacheable(toolDef, this.options.policies);
+  }
+
+  /**
+   * Deduplicated background revalidation helper for stale-while-revalidate.
+   *
+   * Marks the cache key as being revalidated so subsequent concurrent `get()`
+   * calls that would also see `needsRevalidation: true` get `false` instead,
+   * preventing a thundering herd of parallel refreshes.
+   *
+   * The key is removed from the revalidating set on completion (success or
+   * failure), allowing a future `get()` to schedule a fresh revalidation if
+   * the entry is still stale at that point.
+   *
+   * @param server   MCP server name.
+   * @param tool     Tool name.
+   * @param args     Original call arguments (used to build the cache key).
+   * @param fetchFn  Async function that calls the backend and returns the fresh result.
+   * @returns        A promise that resolves when the background refresh completes.
+   *                 Callers should `.catch()` the returned promise to handle errors.
+   */
+  refreshInBackground(
+    server: string,
+    tool: string,
+    args: unknown,
+    fetchFn: () => Promise<unknown>
+  ): Promise<void> {
+    const cacheKey = buildCacheKey(server, tool, args);
+    const keyStr = cacheKeyToString(cacheKey);
+
+    // Already in-flight — skip
+    if (this.revalidating.has(keyStr)) {
+      return Promise.resolve();
+    }
+
+    this.revalidating.add(keyStr);
+
+    return (async () => {
+      try {
+        const freshResult = await fetchFn();
+        await this.set(server, tool, args, freshResult);
+      } finally {
+        this.revalidating.delete(keyStr);
+      }
+    })();
   }
 
   destroy(): void {
