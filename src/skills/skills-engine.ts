@@ -488,14 +488,34 @@ const __skill_${this.sanitiseName(name)} = (() => {
 let globalSkillsEngine: SkillsEngine | null = null;
 
 /**
- * Get or create the global skills engine
+ * Get or create the global skills engine.
+ *
+ * Skills directory resolution order (PRD §5 Phase 5):
+ *   1. config.skillsDir — explicit caller override
+ *   2. process.env.CLAUDE_SKILLS_DARKICE — environment variable
+ *   3. './skills' — default relative path when config is supplied
+ *
+ * Throws when called with no config AND no CLAUDE_SKILLS_DARKICE env var
+ * (preserves original contract for callers that always pass config).
  */
 export function getSkillsEngine(config?: SkillsEngineConfig): SkillsEngine {
   if (!globalSkillsEngine) {
-    if (!config) {
+    // Resolve skills directory with env-var fallback
+    const envDir = process.env.CLAUDE_SKILLS_DARKICE;
+    const skillsDir = config?.skillsDir ?? envDir;
+
+    if (!skillsDir && !config) {
       throw new Error('Skills engine not initialised. Provide config on first call.');
     }
-    globalSkillsEngine = new SkillsEngine(config);
+
+    const resolvedConfig: SkillsEngineConfig = {
+      skillsDir: skillsDir ?? './skills',
+      watchEnabled: false,
+      allowedCategories: [],
+      ...config,
+    };
+
+    globalSkillsEngine = new SkillsEngine(resolvedConfig);
   }
   return globalSkillsEngine;
 }

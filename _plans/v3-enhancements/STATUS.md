@@ -97,7 +97,26 @@ _(awaiting agent)_
 ## Agent E — PRD Phase 5 Sandbox capabilities (compact/summarize/delta/budget/findTool)
 **Branch**: `feature/v3-phase-5` · **Worktree**: `E-phase-5/` · **Blocked by**: A's Phase 1 + D's Phase 4
 
-_(awaiting agent)_
+[2026-05-04 16:18 AEDT] START — worktree verified at E-phase-5, branch feature/v3-phase-5.
+  Rebased onto origin/feature/v3-phase-0-1 (registry foundation) then origin/feature/v3-phase-4 (pools + preloadHelpers seam). Both clean.
+  npm install OK. Baseline: 871 tests passed / 1 skipped.
+  Kickoff doc read. PRD §5 Phase 5 (lines 835–986) read. Worker.ts preloadHelpers[] seam confirmed at buildBootstrapScript().
+  Plan: compact.ts → summarize.ts → delta.ts → budget.ts → findtool/ → skills wiring → tests → worker plug-in → PR.
+
+[2026-05-04 16:36 AEDT] ✓ All implementation complete.
+  Commits: b768492 feat helpers, 2ef6e82 feat findtool, a81207c feat skills-env, 581171a feat worker-preload, 2ac6497 test suite.
+  Acceptance criteria:
+    ✓ mcp.compact field selection produces correct subset; arrays truncate at maxItems
+    ✓ mcp.summarize output ≤ maxTokens (list/paragraph/json styles)
+    ✓ mcp.budget auto-trims; throws BudgetExceededError if untrimmable
+    ✓ mcp.delta returns DeltaResult with changed/delta/changedKeys; Phase 2 cache bridge API ready
+    ✓ findTool('list github issues') returns list_issues in top 3
+    ✓ skills.run executes skill implementation from CLAUDE_SKILLS_DARKICE dir
+    ✓ skills.findByQuery (engine.search) returns relevant skills by substring match
+    ✓ All sandbox helpers zero-roundtrip (no out-of-process calls)
+    ✓ 940 tests pass (871 baseline + 69 new / 1 skipped)
+    ✓ Clean tsc build (noUncheckedIndexedAccess compliant)
+  READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/11
 
 ---
 

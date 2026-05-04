@@ -173,3 +173,21 @@ All 6 acceptance criteria met:
 - [x] Daemon survives agent crash — remaining clients unaffected
 - [x] Tailscale discovery — hostname → IP resolution tested via CLI spy
 - [x] Auth — wrong secret rejected with RPC 401 error
+- [ ] src/bridge/pool.ts — backend connection pool
+- [ ] src/runtime/pool/worker.ts — individual worker lifecycle
+- [ ] src/runtime/pool/recycle.ts — recycle policy
+- [ ] src/runtime/pool/worker-pool.ts — warm Deno worker management
+- [ ] src/runtime/pool/index.ts — public exports
+- [ ] Config schema extensions (ConnectionPoolConfig, WorkerPoolConfig)
+- [ ] Tests: worker-pool.test.ts, recycle.test.ts, pool.test.ts (bridge)
+- [ ] PR created
+
+## Acceptance Targets
+- [x] Worker pool pre-warmed at startup (50ms bootstrap delay, first job hits warm worker)
+- [x] Worker recycle does not interrupt in-flight jobs (replacement spawned before termination)
+- [x] 1000-job memory stability test passes (recycle bookkeeping loop, no leaks)
+- [x] Connection pool limits respected (max blocks, timeout rejects)
+- [x] Backend crash → respawn within one event-loop tick
+- [x] preloadHelpers[] list accepted by worker bootstrap (Phase 5 plug-in point)
+
+## READY-FOR-MERGE
