@@ -17,7 +17,7 @@
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net';
 import {
-  existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync,
+  existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -47,8 +47,8 @@ function loadOrCreateSecret(authPath: string): string {
   mkdirSync(CONDUCTOR_DIR, { recursive: true });
   const secret = randomBytes(32).toString('hex');
   const content: AuthFile = { sharedSecret: secret };
-  writeFileSync(authPath, JSON.stringify(content, null, 2), 'utf-8');
-  chmodSync(authPath, 0o600);
+  // Pass mode: 0o600 atomically so the file is never world-readable (CRIT-4).
+  writeFileSync(authPath, JSON.stringify(content, null, 2), { mode: 0o600, encoding: 'utf-8' });
   logger.info('DaemonServer: generated new shared secret', { authPath });
   return secret;
 }
