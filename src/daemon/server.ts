@@ -44,7 +44,8 @@ const CONDUCTOR_DIR = join(homedir(), '.mcp-conductor');
 // buffer without bound, causing an OOM. Destroy the socket if exceeded.
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
-function loadOrCreateSecret(authPath: string): string {
+/** @internal Exported for testing only. Do not call directly in production code. */
+export function loadOrCreateSecret(authPath: string): string {
   // MED-1: open the file directly instead of existsSync + readFileSync to
   // eliminate the TOCTOU window. Treat ENOENT as "not found" and fall through
   // to generation; re-throw anything else (permission denied, I/O error, etc.).
