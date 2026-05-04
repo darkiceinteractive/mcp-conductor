@@ -145,3 +145,31 @@ All 6 acceptance criteria met:
 - `src/cli/daemon.ts` — daemon CLI subcommands (start/stop/status/logs)
 - `test/unit/daemon/` — unit tests for all daemon modules
 - `test/integration/daemon/` — two-agent integration scenarios
+
+### Checkpoint: READY-FOR-MERGE
+- **Date**: 2026-05-04
+- **PR**: https://github.com/darkiceinteractive/mcp-conductor/pull/6
+- **Status**: READY-FOR-MERGE
+- **Tests**: 907 passed | 1 skipped | 0 failed (47 test files; baseline was 848/41)
+- **Type-check**: clean (`npx tsc --noEmit`)
+
+### Delivery summary
+
+| File | Description |
+|------|-------------|
+| `src/daemon/shared-kv.ts` | In-memory + disk-persistent KV with TTL, 30 s sweep |
+| `src/daemon/shared-lock.ts` | In-process promise-chain mutex, timeout, double-release safe |
+| `src/daemon/server.ts` | Unix+TCP daemon, HMAC-SHA256 auth, per-client lock handles |
+| `src/daemon/client.ts` | RPC bridge: kv/lock/broadcast/subscribe/callTool |
+| `src/daemon/discovery.ts` | Tailscale CLI query, hostname→IP resolution, 10 s cache |
+| `src/daemon/sandbox-api.ts` | `mcp.shared.*` API surface + no-op stub for standalone mode |
+| `src/daemon/index.ts` | Public barrel export |
+| `src/cli/daemon.ts` | `registerDaemonCommands(program)` for Agent I import; start/stop/status/logs |
+
+### Acceptance criteria
+- [x] Two agents share cache (agent B hits cache written by agent A)
+- [x] Lock serialises 100 concurrent writers — max concurrency observed = 1
+- [x] KV TTL expiry — expired entry invisible to both local and remote readers
+- [x] Daemon survives agent crash — remaining clients unaffected
+- [x] Tailscale discovery — hostname → IP resolution tested via CLI spy
+- [x] Auth — wrong secret rejected with RPC 401 error
