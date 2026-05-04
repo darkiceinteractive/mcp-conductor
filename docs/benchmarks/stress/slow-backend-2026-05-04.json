@@ -1,0 +1,60 @@
+{
+  "suite": "R1 — slow-backend-cascade",
+  "date": "2026-05-04",
+  "gatewayTimeoutMs": 3000,
+  "concurrency": 100,
+  "buckets": [
+    {
+      "backendMs": 100,
+      "timeoutMs": 3000,
+      "concurrency": 100,
+      "successes": 100,
+      "timeouts": 0,
+      "circuitOpen": 0,
+      "retrySuccesses": 0,
+      "failures": 0,
+      "wallClockMs": 104,
+      "maxSingleCallMs": 103,
+      "allSettledWithinCeilingMs": true
+    },
+    {
+      "backendMs": 500,
+      "timeoutMs": 3000,
+      "concurrency": 100,
+      "successes": 100,
+      "timeouts": 0,
+      "circuitOpen": 0,
+      "retrySuccesses": 0,
+      "failures": 0,
+      "wallClockMs": 503,
+      "maxSingleCallMs": 502,
+      "allSettledWithinCeilingMs": true
+    },
+    {
+      "backendMs": 1000,
+      "timeoutMs": 3000,
+      "concurrency": 100,
+      "successes": 100,
+      "timeouts": 0,
+      "circuitOpen": 0,
+      "retrySuccesses": 0,
+      "failures": 0,
+      "wallClockMs": 1002,
+      "maxSingleCallMs": 1002,
+      "allSettledWithinCeilingMs": true
+    },
+    {
+      "backendMs": 2000,
+      "timeoutMs": 3000,
+      "concurrency": 100,
+      "successes": 100,
+      "timeouts": 0,
+      "circuitOpen": 0,
+      "retrySuccesses": 0,
+      "failures": 0,
+      "wallClockMs": 2002,
+      "maxSingleCallMs": 2002,
+      "allSettledWithinCeilingMs": true
+    }
+  ]
+}
