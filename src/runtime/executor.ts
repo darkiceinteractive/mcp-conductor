@@ -293,32 +293,51 @@ const __mcpBase = {
    * Smart batch execution with automatic rate limit detection and handling.
    * Attempts parallel execution first, falls back to sequential with delays if rate limited.
    *
-   * @param calls Array of { server, tool, params } objects
+   * Two call shapes are supported:
+   *   1. Descriptor form (rate-limit aware): \`mcp.batch([{ server, tool, params }, ...])\`
+   *   2. Callback form (composable, bypasses rate-limit detection):
+   *      \`mcp.batch([() => mcp.server('x').call('y', {}), ...])\`
+   *
+   * Mix-and-match in one call is not supported — pick a shape per call.
+   *
+   * @param calls Array of descriptors OR array of () => Promise<T>
    * @param options Optional { maxParallel, retryDelayMs }
    * @returns Array of results in same order as calls
    */
   async batch<T = unknown>(
-    calls: Array<{ server: string; tool: string; params?: Record<string, unknown> }>,
+    calls: Array<
+      | { server: string; tool: string; params?: Record<string, unknown> }
+      | (() => Promise<T>)
+    >,
     options: { maxParallel?: number; retryDelayMs?: number; forceParallel?: boolean } = {}
   ): Promise<T[]> {
-    const { maxParallel = calls.length, retryDelayMs = 1100, forceParallel = false } = options;
-    const results: T[] = new Array(calls.length);
+    // Detect callback form by inspecting the first element. The callback form
+    // bypasses rate-limit detection because we don't know which servers are
+    // being called — Promise.all is sufficient.
+    if (calls.length > 0 && typeof calls[0] === 'function') {
+      return Promise.all((calls as Array<() => Promise<T>>).map(fn => fn()));
+    }
+
+    // Descriptor form — preserves all existing behaviour (rate limits, retries).
+    const descriptorCalls = calls as Array<{ server: string; tool: string; params?: Record<string, unknown> }>;
+    const { maxParallel = descriptorCalls.length, retryDelayMs = 1100, forceParallel = false } = options;
+    const results: T[] = new Array(descriptorCalls.length);
 
     // Clear rate limit cache if forcing parallel (e.g., after API upgrade)
     if (forceParallel) {
-      for (const call of calls) {
+      for (const call of descriptorCalls) {
         delete __rateLimits[call.server];
       }
       mcp.log(\`🔄 Force parallel mode enabled - rate limit cache cleared\`);
     }
 
     // Check if any server has known rate limits
-    const hasKnownRateLimit = !forceParallel && calls.some(c => __rateLimits[c.server]?.detected);
+    const hasKnownRateLimit = !forceParallel && descriptorCalls.some(c => __rateLimits[c.server]?.detected);
 
     if (hasKnownRateLimit) {
       // Sequential with delays for rate-limited servers
-      for (let i = 0; i < calls.length; i++) {
-        const { server, tool, params = {} } = calls[i];
+      for (let i = 0; i < descriptorCalls.length; i++) {
+        const { server, tool, params = {} } = descriptorCalls[i];
         const rateLimit = __rateLimits[server];
         if (rateLimit?.detected && i > 0) {
           await __sleep(rateLimit.delayMs);
@@ -331,7 +350,7 @@ const __mcpBase = {
 
     // Try parallel execution first
     const parallelResults = await Promise.all(
-      calls.map(async ({ server, tool, params = {} }) => {
+      descriptorCalls.map(async ({ server, tool, params = {} }) => {
         const client = new MCPServerClient(server);
         return client.call(tool, params);
       })
@@ -343,12 +362,12 @@ const __mcpBase = {
       if (__isRateLimitError(parallelResults[i])) {
         rateLimitedIndices.push(i);
         // Mark this server as rate limited
-        __rateLimits[calls[i].server] = {
+        __rateLimits[descriptorCalls[i].server] = {
           detected: true,
           delayMs: retryDelayMs,
           lastError: Date.now(),
         };
-        mcp.log(\`⚠️  RATE LIMITED: \${calls[i].server} - Free tier limit hit. Retrying with delays...\`);
+        mcp.log(\`⚠️  RATE LIMITED: \${descriptorCalls[i].server} - Free tier limit hit. Retrying with delays...\`);
         mcp.log(\`💡 TIP: Upgrade your API plan for parallel execution: https://brave.com/search/api/\`);
       } else {
         results[i] = parallelResults[i] as T;
@@ -359,7 +378,7 @@ const __mcpBase = {
     if (rateLimitedIndices.length > 0) {
       for (const idx of rateLimitedIndices) {
         await __sleep(retryDelayMs);
-        const { server, tool, params = {} } = calls[idx];
+        const { server, tool, params = {} } = descriptorCalls[idx];
         const client = new MCPServerClient(server);
         results[idx] = await client.call(tool, params) as T;
       }
@@ -495,7 +514,7 @@ export class DenoExecutor {
 
   constructor(config: SandboxConfig) {
     this.config = config;
-    this.maxConcurrentProcesses = config.maxConcurrentProcesses ?? 5;
+    this.maxConcurrentProcesses = config.maxConcurrentProcesses ?? 8;
     this.maxOutputBytes = config.maxOutputBytes ?? 10 * 1024 * 1024;
     this.tempDir = join(tmpdir(), 'mcp-executor');
 

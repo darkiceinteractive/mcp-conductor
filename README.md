@@ -161,11 +161,20 @@ Inside `execute_code`, you have access to the `mcp` object:
 // Call a server tool
 const result = await mcp.server('github').call('list_issues', { owner: 'org', repo: 'repo' });
 
-// Parallel execution — executes all calls simultaneously
+// Parallel execution — executes all calls simultaneously.
+// Two call shapes are supported:
+//
+//   1. Callback form (composable, no rate-limit detection):
 const [issues, files, searches] = await mcp.batch([
   () => mcp.server('github').call('list_issues', { owner: 'org', repo: 'repo' }),
   () => mcp.server('filesystem').call('list_directory', { path: '/src' }),
   () => mcp.server('brave-search').call('search', { q: 'topic', count: 5 })
+]);
+
+//   2. Descriptor form (rate-limit aware, retries on 429s):
+const [a, b] = await mcp.batch([
+  { server: 'github', tool: 'list_issues', params: { owner: 'org', repo: 'repo' } },
+  { server: 'filesystem', tool: 'list_directory', params: { path: '/src' } },
 ]);
 
 // Batch web searches (handles rate limits automatically)

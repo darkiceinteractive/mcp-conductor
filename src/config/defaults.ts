@@ -32,7 +32,10 @@ export const DEFAULT_CONFIG: MCPExecutorConfig = {
   sandbox: {
     maxMemoryMb: 128,
     allowedNetHosts: ['localhost'],
-    maxConcurrentProcesses: 5,
+    // Bumped from 5 → 8 in v2.0.0-alpha.2 (X3 cleanup) per IBKR-side analysis
+    // finding #5. PRD Phase 4's worker pool further parameterises this with
+    // per-server overrides and warm-pool sizing.
+    maxConcurrentProcesses: 8,
     maxOutputBytes: 10 * 1024 * 1024, // 10MB
   },
   skills: {
