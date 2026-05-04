@@ -24,11 +24,17 @@ export interface ToolCallRequest {
   params: Record<string, unknown>;
 }
 
+import { MCPToolError } from '../reliability/errors.js';
+
 export interface ToolCallResponse {
   result?: unknown;
   error?: {
     type: string;
     message: string;
+    /** Populated when type === 'mcp_tool_error' */
+    code?: string;
+    server?: string;
+    tool?: string;
   };
   metrics?: {
     durationMs: number;
@@ -481,10 +487,17 @@ export class HttpBridge {
 
       this.sendJson(res, response);
     } catch (error) {
+      const isMcpToolError = error instanceof MCPToolError;
       const response: ToolCallResponse = {
         error: {
-          type: 'tool_error',
+          type: isMcpToolError ? 'mcp_tool_error' : 'tool_error',
           message: String(error),
+          // Serialize MCPToolError structured fields so the sandbox can reconstruct
+          ...(isMcpToolError && {
+            code: (error as MCPToolError).code,
+            server: (error as MCPToolError).server,
+            tool: (error as MCPToolError).tool,
+          }),
         },
         metrics: {
           durationMs: Date.now() - startTime,

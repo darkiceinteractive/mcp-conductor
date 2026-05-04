@@ -125,6 +125,21 @@ console.log = (...args: unknown[]) => {
   }
 };
 
+// MCPToolError shim — mirrors the server-side class so instanceof checks work
+// in the sandbox without importing the server bundle.
+class MCPToolError extends Error {
+  readonly name = 'MCPToolError';
+  constructor(
+    readonly code: string,
+    readonly server: string,
+    readonly tool: string,
+    readonly upstream: unknown
+  ) {
+    super(\`[\${server}.\${tool}] \${code}\`);
+    Object.setPrototypeOf(this, MCPToolError.prototype);
+  }
+}
+
 // MCP Server Client with streaming support
 class MCPServerClient {
   constructor(public readonly name: string) {}
@@ -170,6 +185,10 @@ class MCPServerClient {
             durationMs,
             error: data.error.message,
           });
+        }
+        // Reconstruct MCPToolError if the bridge serialized structured fields
+        if (data.error.type === 'mcp_tool_error' && data.error.code !== undefined) {
+          throw new MCPToolError(data.error.code, data.error.server ?? this.name, data.error.tool ?? tool, data.error.message);
         }
         throw new Error(\`Tool error (\${this.name}.\${tool}): \${data.error.message}\`);
       }
