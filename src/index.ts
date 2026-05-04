@@ -29,6 +29,7 @@ import { LIFECYCLE_TIMEOUTS } from './config/defaults.js';
 import { logger } from './utils/index.js';
 import { startOrphanWatch } from './utils/orphan-watch.js';
 import { BUILD_STRING } from './version.js';
+import { ToolRegistry } from './registry/index.js';
 
 /**
  * Main entry point
@@ -92,6 +93,13 @@ async function main(): Promise<void> {
 
   try {
     await server.start();
+
+    // Initialise the Tool Registry — single source of truth for all backend
+    // MCP tool definitions. Populated here so it is ready before any tool
+    // call is dispatched. The hub satisfies the BackendBridge interface.
+    const registry = new ToolRegistry({ bridge: server.getHub() });
+    const catalogSnapshot = await registry.refresh();
+    logger.info('ToolRegistry initialised', { toolCount: catalogSnapshot.length });
 
     // Orphan watchdog: if the MCP client that spawned us dies, our
     // parent PID changes (usually to 1 on POSIX). Poll for that and

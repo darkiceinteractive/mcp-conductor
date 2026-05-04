@@ -10,7 +10,28 @@ Format per checkpoint:
 ## Agent A — PRD Phase 0 + Phase 1 + finish X3 leftovers
 **Branch**: `feature/v3-phase-0-1` · **Worktree**: `mcp-executor-darkice-worktrees/A-phase-0-1/`
 
-_(awaiting agent)_
+[2026-05-04 15:33 AEDT] START — worktree verified, kickoff doc read, PRD read, consolidated plan read.
+  Baseline: e8bf3b8 docs(v3) on feature/v3-phase-0-1.
+  Beginning Block 1: wiki note + mcp.batch integration tests.
+
+[2026-05-04 16:00 AEDT] ✓ Block 1 complete — wiki troubleshooting note + 2 mcp.batch integration tests committed (e993c2d).
+[2026-05-04 16:00 AEDT] ✓ Block 2 complete — 6 deps installed, stub dirs created, .gitignore updated (fa38871).
+[2026-05-04 16:00 AEDT] ✓ Block 3 complete — full src/registry/ implementation (6 files) + 4 test suites (848 pass / 1 skip).
+  Commits: bc0aac6 feat(v3-phase-1) skeleton, 07ddb9d test(v3-phase-1) suites, 9b5dcdc feat(v3-phase-1) wiring.
+  Acceptance criteria:
+    ✓ src/registry/index.ts — ToolDefinition, BackendBridge, RegistryOptions, JsonSchema, ValidationResult
+    ✓ src/registry/events.ts — RegistryEmitter + RegistryEvent union
+    ✓ src/registry/validator.ts — validateAgainstSchema, validateToolInput; ajv p99 <1ms verified
+    ✓ src/registry/snapshot.ts — saveSnapshot/loadSnapshot; version mismatch → null; creates intermediate dirs
+    ✓ src/registry/typegen.ts — generateServerTypes, generateIndexTypes, buildRoutingManifest, writeTypesToDir
+    ✓ src/registry/registry.ts — ToolRegistry class; refresh, hot-reload events, annotate, validateInput, generateTypes
+    ✓ ToolDefinition.routing / .redact / .examples plan-amendment fields present
+    ✓ typegen emits @example JSDoc from examples[]; writes <server>.routing.json
+    ✓ ToolRegistry wired into src/index.ts; refresh() called after server.start(); tool count logged
+    ✓ 0 lint errors; clean tsc build; coverage not dropped below 82%
+    ✓ All 14 existing MCP tool signatures unchanged
+[2026-05-04 16:01 AEDT] ✓ Block 4 complete — PR opened.
+  READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/2
 
 ---
 
