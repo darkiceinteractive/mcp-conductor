@@ -12,7 +12,7 @@
  */
 
 import { createConnection, type Socket } from 'node:net';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHmac } from 'node:crypto';
@@ -242,14 +242,21 @@ export class DaemonClient {
   // ---------------------------------------------------------------------------
 
   private loadSecret(authPath: string): string {
-    if (!existsSync(authPath)) {
-      throw new Error(
-        `DaemonClient: auth file not found at ${authPath}. ` +
-        'Start the daemon first with `mcp-conductor-cli daemon start`.',
-      );
+    // MED-1: open directly instead of existsSync + readFileSync to eliminate
+    // the TOCTOU window. ENOENT → user-friendly "start the daemon" message;
+    // any other error (EACCES, EIO, etc.) propagates as-is.
+    try {
+      const raw = readFileSync(authPath, 'utf-8');
+      return (JSON.parse(raw) as AuthFile).sharedSecret;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          `DaemonClient: auth file not found at ${authPath}. ` +
+          'Start the daemon first with `mcp-conductor-cli daemon start`.',
+        );
+      }
+      throw err;
     }
-    const raw = readFileSync(authPath, 'utf-8');
-    return (JSON.parse(raw) as AuthFile).sharedSecret;
   }
 
   private openSocket(): Promise<Socket> {

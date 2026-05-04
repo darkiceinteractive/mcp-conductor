@@ -19,7 +19,7 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net';
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -40,11 +40,19 @@ const DEFAULT_SOCKET_PATH = join(homedir(), '.mcp-conductor', 'daemon.sock');
 const CONDUCTOR_DIR = join(homedir(), '.mcp-conductor');
 
 function loadOrCreateSecret(authPath: string): string {
-  if (existsSync(authPath)) {
+  // MED-1: open the file directly instead of existsSync + readFileSync to
+  // eliminate the TOCTOU window. Treat ENOENT as "not found" and fall through
+  // to generation; re-throw anything else (permission denied, I/O error, etc.).
+  try {
     const raw = readFileSync(authPath, 'utf-8');
     return (JSON.parse(raw) as AuthFile).sharedSecret;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+    // File does not exist — fall through to generate a new secret.
   }
-  mkdirSync(CONDUCTOR_DIR, { recursive: true });
+  mkdirSync(dirname(authPath), { recursive: true });
   const secret = randomBytes(32).toString('hex');
   const content: AuthFile = { sharedSecret: secret };
   // Pass mode: 0o600 atomically so the file is never world-readable (CRIT-4).
