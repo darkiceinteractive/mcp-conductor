@@ -172,6 +172,26 @@ READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/10
   Baseline: 859 tests pass (848 Phase-1 + 11 X1). Kickoff doc + consolidated plan §3 Part C read.
   ToolDefinition.redact already scaffolded in src/registry/index.ts. Implementation beginning.
 
+[2026-05-04 16:35 AEDT] ✓ Implementation complete — 4 commits, 880 tests pass (859 baseline + 21 new).
+  Acceptance criteria:
+    ✓ Server returning {"email":"x@y.com","phone":"+61 412 345 678"} → {"email":"[EMAIL_1]","phone":"[PHONE_1]"} in sandbox
+    ✓ mcp.detokenize("[EMAIL_1]") returns x@y.com within same execute_code call
+    ✓ Token survives within-call outbound MCP call (detokenize before forwarding)
+    ✓ Final sandbox result returns tokens — Claude never sees raw PII
+    ✓ Subsequent execute_code call cannot detokenize tokens from prior call (fresh reverseMap)
+    ✓ 12 unit tests (all 6 matchers) + 6 integration tests pass
+  Files:
+    NEW src/utils/tokenize.ts — pure matcher engine (email/phone/SSN/CC-Luhn/IBAN/IPv4/v6)
+    MOD src/utils/index.ts — re-exports tokenize/detokenize
+    MOD src/hub/mcp-hub.ts — callToolTokenized() method
+    MOD src/bridge/http-server.ts — ToolCallResponse.reverseMap + TokenizedCallResult sentinel
+    MOD src/server/mcp-server.ts — bridge handler checks registry.getTool().redact
+    MOD src/runtime/executor.ts — __reverseMap accumulator + mcp.detokenize()
+    NEW test/unit/tokenize.test.ts — 12 unit cases
+    NEW test/integration/tokenize-flow.test.ts — 6 integration cases
+
+READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/9
+
 ---
 
 ## Agent K — Integration day
