@@ -245,20 +245,29 @@ export class WorkerPool {
 
     if (!this.isShuttingDown) {
       const replacement = new PooledWorker(workerOpts);
-      // Start async — don't block the caller
+
+      // B7: Push the replacement into this.workers synchronously while it is
+      // still in 'starting' state. This closes the recycle window where the
+      // old (dead) worker was still in the array between shutdown() and the
+      // async .then() callback. _findIdle() requires state === 'idle', so the
+      // replacement is invisible to job routing until start() resolves and
+      // PooledWorker transitions its state to 'idle' internally.
+      const idx = this.workers.indexOf(worker);
+      if (idx !== -1) {
+        this.workers.splice(idx, 1, replacement);
+      } else {
+        this.workers.push(replacement);
+      }
+
       replacement.start().then(() => {
-        const idx = this.workers.indexOf(worker);
-        if (idx !== -1) {
-          this.workers.splice(idx, 1, replacement);
-        } else {
-          this.workers.push(replacement);
-        }
+        // Replacement is now 'idle' (state set inside PooledWorker.start()).
+        // Drain any queued jobs that accumulated while it was starting.
         this._drainQueue();
         logger.debug('WorkerPool: replacement worker ready', { workerId: replacement.id });
       }).catch((err) => {
         logger.error('WorkerPool: replacement spawn failed', { err: String(err) });
-        // Remove old dead worker anyway
-        this._removeWorker(worker);
+        // Remove the failed replacement — it never became idle.
+        this._removeWorker(replacement);
       });
     }
 

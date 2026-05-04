@@ -19,8 +19,14 @@ import type { WorkerPoolOptions } from './worker-pool.js';
 export interface RecycleCandidate {
   /** Worker unique identifier */
   id: string;
-  /** Current state of the worker */
-  state: 'idle' | 'busy' | 'recycling' | 'dead';
+  /**
+   * Current state of the worker. Includes 'starting' (B7) because a
+   * replacement pushed synchronously into the pool array may be evaluated
+   * before its start() promise resolves. A 'starting' worker is not in an
+   * error state — it falls through to age/job-count checks and isEligible()
+   * returns false (state !== 'idle'), so no jobs are routed to it.
+   */
+  state: 'starting' | 'idle' | 'busy' | 'recycling' | 'dead';
   /** Epoch ms when the worker was created */
   createdAt: number;
   /** Total jobs run since creation */
