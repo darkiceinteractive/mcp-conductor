@@ -18,3 +18,4 @@ Versions follow [Semantic Versioning](https://semver.org/).
   - `MetricsCollector.recordToolCall(server, tool, responseBytes, isPassthrough)` for per-tool aggregation.
   - `MetricsCollector.getTokenSavings(): SessionTokenSavings` for session-level reporting.
   - Wiki: `Metrics-and-Token-Savings.md` updated with reporter documentation, all three modes, example output, and full caveats section.
+- **Docusaurus docs site scaffold (D1)** — first build green, content migration in follow-up block D2.

@@ -30,6 +30,11 @@ tmp/
 # npm
 *.tgz
 
+# Docs site (Docusaurus) — build outputs only; source is committed
+docs-site/node_modules
+docs-site/build
+docs-site/.docusaurus
+
 # Claude / OMC session files (private, not for public repo)
 .claude/
 .omc/
