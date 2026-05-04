@@ -11,6 +11,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 - **Stress test suite (S — concurrency)** at `test/stress/` (5 files): execute-code concurrency sweep (10→1000), worker pool scaling sweep (1→32 workers), bridge RPS ceiling, burst recovery, observability overhead. Heavy variants behind `STRESS=1` env. Curves emitted to `docs/benchmarks/stress/*.json` per run. New scripts: `npm run test:stress` (PR gate), `npm run test:stress:full` (nightly). Nightly workflow extended with `stress-tests` job.
 - **Stress test suite (P — payloads + tokenization + cache)** at `test/stress/` (5 files): large-payload handling (100KB→50MB), tokenize scaling sweep (1KB→10MB × density), deep/wide JSON shapes (100/500/1000 deep × 10K/100K/1M wide), cache storm (write churn, read amplification, mixed ratios, key-collision attempts), findTool vector index scaling (100→100K tools). Heavy variants behind `STRESS=1`. Curves emitted to `docs/benchmarks/stress/*.json` per run.
+- **Stress test suite (R — reliability + cascading failure)** at `test/stress/` (5 files): slow-backend cascade (100ms→5s), flapping-backend (alternating 10-success/10-failure cycles with rolling-window trip/recover), circuit-breaker storm (5 concurrent backends going down/recovering), retry amplification bounds (concurrency 1/5/50/500), mixed-fault soak (20%/10%/5%/5%/5% fault rates over 5min). Heavy variants behind `STRESS=1`. Curves emitted to `docs/benchmarks/stress/*.json` per run.
 
 ## [3.1.0-rc.1] - 2026-05-04
 

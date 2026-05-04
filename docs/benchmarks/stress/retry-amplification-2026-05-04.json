@@ -1,0 +1,45 @@
+{
+  "suite": "R4 — retry-amplification",
+  "date": "2026-05-04",
+  "config": {
+    "failFirstN": 3,
+    "maxRetries": 3,
+    "retryDelayMs": 10,
+    "wallCeilingMs": 280
+  },
+  "results": [
+    {
+      "concurrency": 1,
+      "totalBackendCalls": 4,
+      "maxExpectedBackendCalls": 4,
+      "successes": 1,
+      "failures": 0,
+      "wallClockMs": 73,
+      "wallCeilingMs": 280,
+      "withinCeiling": true,
+      "amplificationFactor": 4
+    },
+    {
+      "concurrency": 5,
+      "totalBackendCalls": 20,
+      "maxExpectedBackendCalls": 20,
+      "successes": 5,
+      "failures": 0,
+      "wallClockMs": 73,
+      "wallCeilingMs": 280,
+      "withinCeiling": true,
+      "amplificationFactor": 4
+    },
+    {
+      "concurrency": 50,
+      "totalBackendCalls": 200,
+      "maxExpectedBackendCalls": 200,
+      "successes": 50,
+      "failures": 0,
+      "wallClockMs": 75,
+      "wallCeilingMs": 280,
+      "withinCeiling": true,
+      "amplificationFactor": 4
+    }
+  ]
+}

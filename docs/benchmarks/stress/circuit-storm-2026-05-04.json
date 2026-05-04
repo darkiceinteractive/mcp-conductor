@@ -1,0 +1,85 @@
+{
+  "suite": "R3 — circuit-breaker-storm",
+  "date": "2026-05-04",
+  "constants": {
+    "DOWN_AT_MS": 300,
+    "RECOVER_AT_MS": 600,
+    "TEST_DURATION_MS": 1200,
+    "CALL_INTERVAL_MS": 15
+  },
+  "profile": {
+    "timeoutMs": 100,
+    "retries": 0,
+    "retryDelayMs": 10,
+    "retryMaxDelayMs": 50,
+    "circuitBreakerThreshold": 0.5,
+    "circuitBreakerWindowMs": 120,
+    "circuitBreakerMinCalls": 5,
+    "halfOpenProbeIntervalMs": 80
+  },
+  "backends": {
+    "A": {
+      "name": "A",
+      "totalGatewayCalls": 74,
+      "successes": 74,
+      "failures": 0,
+      "circuitOpenFastFails": 0,
+      "stateTimeline": []
+    },
+    "B": {
+      "name": "B",
+      "totalGatewayCalls": 74,
+      "successes": 19,
+      "failures": 14,
+      "circuitOpenFastFails": 41,
+      "stateTimeline": [
+        {
+          "ts": 375,
+          "state": "open"
+        }
+      ],
+      "trippedAt": 375
+    },
+    "C": {
+      "name": "C",
+      "totalGatewayCalls": 74,
+      "successes": 19,
+      "failures": 14,
+      "circuitOpenFastFails": 41,
+      "stateTimeline": [
+        {
+          "ts": 375,
+          "state": "open"
+        }
+      ],
+      "trippedAt": 375
+    },
+    "D": {
+      "name": "D",
+      "totalGatewayCalls": 74,
+      "successes": 55,
+      "failures": 7,
+      "circuitOpenFastFails": 12,
+      "stateTimeline": [
+        {
+          "ts": 375,
+          "state": "open"
+        },
+        {
+          "ts": 615,
+          "state": "closed"
+        }
+      ],
+      "trippedAt": 375,
+      "recoveredAt": 615
+    },
+    "E": {
+      "name": "E",
+      "totalGatewayCalls": 74,
+      "successes": 74,
+      "failures": 0,
+      "circuitOpenFastFails": 0,
+      "stateTimeline": []
+    }
+  }
+}
