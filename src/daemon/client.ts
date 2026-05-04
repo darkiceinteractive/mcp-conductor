@@ -325,16 +325,30 @@ export class DaemonClient {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const msg = JSON.parse(trimmed) as RpcResponse;
-        this.handleResponse(msg);
+        const raw = JSON.parse(trimmed) as Record<string, unknown>;
+        // HIGH-3: broadcast envelope is structurally distinct from RPC responses.
+        // Route it directly to push listeners; never touch the pending RPC map.
+        if (raw['__broadcast__'] === true) {
+          this.deliverBroadcast(raw['channel'] as string, raw['message']);
+          continue;
+        }
+        this.handleResponse(raw as unknown as RpcResponse);
       } catch {
         logger.warn('DaemonClient: malformed JSON from server');
       }
     }
   }
 
+  /** Deliver a server-pushed broadcast to all matching subscribers. */
+  private deliverBroadcast(channel: string, message: unknown): void {
+    for (const listener of this.pushListeners) {
+      listener({ channel, message });
+    }
+  }
+
   private handleResponse(msg: RpcResponse): void {
-    // Push events (id === '__push__') are delivered to pub/sub listeners.
+    // Legacy push events (id === '__push__') — kept for backward compat but
+    // new code uses the __broadcast__ envelope path above.
     if (msg.id === '__push__') {
       for (const listener of this.pushListeners) {
         listener(msg.result);

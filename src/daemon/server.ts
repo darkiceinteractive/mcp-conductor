@@ -17,7 +17,7 @@
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net';
 import {
-  existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync,
+  existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -47,8 +47,8 @@ function loadOrCreateSecret(authPath: string): string {
   mkdirSync(CONDUCTOR_DIR, { recursive: true });
   const secret = randomBytes(32).toString('hex');
   const content: AuthFile = { sharedSecret: secret };
-  writeFileSync(authPath, JSON.stringify(content, null, 2), 'utf-8');
-  chmodSync(authPath, 0o600);
+  // Pass mode: 0o600 atomically so the file is never world-readable (CRIT-4).
+  writeFileSync(authPath, JSON.stringify(content, null, 2), { mode: 0o600, encoding: 'utf-8' });
   logger.info('DaemonServer: generated new shared secret', { authPath });
   return secret;
 }
@@ -287,6 +287,15 @@ export class DaemonServer {
     const nonce = randomBytes(16).toString('hex');
     this.sendRaw(socket, { id: '__auth_challenge__', result: { nonce } });
 
+    // CRIT-3: close sockets that never complete auth within 10 s → prevents FD exhaustion.
+    const authDeadline = setTimeout(() => {
+      if (!authenticated) {
+        logger.warn('DaemonServer: auth timeout, destroying socket', { remote: socket.remoteAddress });
+        socket.destroy();
+      }
+    }, 10_000);
+    authDeadline.unref();
+
     socket.setEncoding('utf-8');
     socket.on('data', (chunk: string) => {
       buffer += chunk;
@@ -303,7 +312,11 @@ export class DaemonServer {
           if (!authenticated) {
             this.handleAuth(socket, msg, nonce, (ok) => {
               authenticated = ok;
-              if (!ok) socket.destroy();
+              if (ok) {
+                clearTimeout(authDeadline); // CRIT-3: auth succeeded; cancel deadline
+              } else {
+                socket.destroy();
+              }
             });
             return;
           }
@@ -319,6 +332,7 @@ export class DaemonServer {
     });
 
     socket.on('close', () => {
+      clearTimeout(authDeadline);
       // Release all locks held by this client on disconnect.
       for (const [key, handle] of state.lockHandles) {
         handle.release().catch(() => {});
@@ -410,14 +424,19 @@ export class DaemonServer {
         const key = p?.key as string;
         const timeoutMs = p?.timeoutMs as number | undefined;
 
+        // HIGH-2: Reject if this client already holds the lock for this key.
+        // Silently overwriting the handle would orphan the old handle and
+        // permanently deadlock the key for all clients.
+        if (state.lockHandles.has(key)) {
+          throw new Error(`ALREADY_HOLDS_LOCK: Already holding lock for key '${key}'`);
+        }
+
         // Acquire the lock — this awaits until the lock is free.
         // Node.js is async; concurrent awaits on different sockets yield to
         // the event loop, so release RPCs from other clients can proceed.
         const handle = await this.lock.acquire(key, { timeoutMs });
 
         // Persist the handle so lock.release can find and call it.
-        // Use a composite key of lockKey + requestId to support multiple
-        // concurrent locks per client on different keys.
         state.lockHandles.set(key, handle);
 
         return { acquired: true, key };
@@ -439,10 +458,15 @@ export class DaemonServer {
         const channel = p?.channel as string;
         const message = p?.message;
         this.bus.broadcast(channel, message);
-        const pushPayload = JSON.stringify({ id: '__push__', result: { channel, message } });
+        // HIGH-3: wrap in a dedicated envelope so clients cannot confuse a
+        // broadcast with an RPC response (e.g. a malicious {id:42,result:{}}
+        // broadcast would not be routed to pending RPC id 42).
+        // Note: sender is included so self-subscribing clients receive their
+        // own broadcasts (the envelope protection prevents injection regardless).
+        const envelope = JSON.stringify({ __broadcast__: true, channel, message }) + '\n';
         for (const [client] of this.clients) {
           if (!client.destroyed) {
-            client.write(pushPayload + '\n');
+            client.write(envelope);
           }
         }
         return null;
