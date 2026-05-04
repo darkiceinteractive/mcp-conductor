@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-04",
+  "scenario": "Google Drive to Salesforce (300 legal contracts)",
+  "description": "Head-to-head comparison vs Anthropic published 150K->2K pattern",
+  "reference": "https://www.anthropic.com/research/building-effective-agents",
+  "fixture": {
+    "documentCount": 300,
+    "avgDocumentBytes": 1450,
+    "totalPassthroughBytes": 435000,
+    "passthroughToolCalls": 301,
+    "extractionScriptChars": 878,
+    "resultJsonChars": 99
+  },
+  "results": {
+    "passthroughTokens": 153900,
+    "executionTokens": 435,
+    "reductionPercent": 99.72,
+    "anthropicClaimedReductionPercent": 98.67,
+    "conductorVsAnthropic": "+1.05%",
+    "verdict": "PASS",
+    "meetsClaim": true
+  },
+  "positioning": "MCP Conductor achieves 99.72% token reduction on the Google Drive->Salesforce pipeline, exceeding Anthropic's published 98.67% by +1.05 percentage points."
+}
