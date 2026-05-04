@@ -199,7 +199,16 @@ class MCPServerClient {
         }
         // Reconstruct MCPToolError if the bridge serialized structured fields
         if (data.error.type === 'mcp_tool_error' && data.error.code !== undefined) {
-          throw new MCPToolError(data.error.code, data.error.server ?? this.name, data.error.tool ?? tool, data.error.message);
+          // Reconstruct upstream Error if it was serialized with the __error__ sentinel (CRIT-2)
+          let upstream: unknown = data.error.upstream;
+          if (upstream && typeof upstream === 'object' && (upstream as Record<string, unknown>).__error__) {
+            const u = upstream as Record<string, unknown>;
+            const reconstructed = new Error(u.message as string);
+            reconstructed.name = u.name as string;
+            if (u.stack) reconstructed.stack = u.stack as string;
+            upstream = reconstructed;
+          }
+          throw new MCPToolError(data.error.code, data.error.server ?? this.name, data.error.tool ?? tool, upstream);
         }
         throw new Error(\`Tool error (\${this.name}.\${tool}): \${data.error.message}\`);
       }
@@ -495,6 +504,36 @@ async function __execute() {
   ${userCode}
 }
 
+// HIGH-1: Scrub plaintext PII values from the result before returning to Claude.
+// Walks the result recursively and replaces any string value that matches a
+// known plaintext in __reverseMap back to its token form. This prevents user
+// code from leaking PII via mcp.detokenize() return values on the sandbox result.
+function __scrubResult(value: unknown): unknown {
+  // Build inverse map: plaintext → token (computed once per call)
+  const plainToToken: Record<string, string> = {};
+  for (const [token, plain] of Object.entries(__reverseMap)) {
+    plainToToken[plain] = token;
+  }
+  function walk(v: unknown): unknown {
+    if (typeof v === 'string') {
+      // Exact-match replacement: whole-field value is the plaintext
+      return Object.prototype.hasOwnProperty.call(plainToToken, v) ? plainToToken[v] : v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, vv] of Object.entries(v as Record<string, unknown>)) {
+        out[k] = walk(vv);
+      }
+      return out;
+    }
+    return v;
+  }
+  // Only scrub when there is something to scrub
+  if (Object.keys(__reverseMap).length === 0) return value;
+  return walk(value);
+}
+
 // Run and output result
 (async () => {
   try {
@@ -511,12 +550,16 @@ async function __execute() {
       await __streamEvent('/progress', { percent: 100, message: 'Execution complete' });
     }
 
+    // Scrub any plaintext PII that user code may have embedded in the result
+    // via mcp.detokenize() before sending back to Claude (HIGH-1).
+    const scrubbedResult = __scrubResult(result);
+
     // Output structured result for parent process to parse
     // When streaming, logs have already been sent in real-time, so omit them to save tokens
     console.log('__RESULT_START__');
     console.log(JSON.stringify({
       success: true,
-      result,
+      result: scrubbedResult,
       logs: STREAM_ENABLED ? [] : __logs,
       metrics: __metrics,
     }));

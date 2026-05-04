@@ -35,6 +35,15 @@ export interface ToolCallResponse {
     code?: string;
     server?: string;
     tool?: string;
+    /**
+     * Serialized upstream error payload (CRIT-2).
+     * When the upstream value was an Error instance it is serialized as
+     * `{ __error__: true, name, message, stack }`. Structured objects are
+     * passed through JSON.parse(JSON.stringify(…)). The sandbox reconstructs
+     * an Error from the `__error__` sentinel so `e.upstream instanceof Error`
+     * works correctly on the other side.
+     */
+    upstream?: unknown;
   };
   metrics?: {
     durationMs: number;
@@ -532,6 +541,26 @@ export class HttpBridge {
       this.sendJson(res, response);
     } catch (error) {
       const isMcpToolError = error instanceof MCPToolError;
+
+      let upstreamSerialized: unknown;
+      if (isMcpToolError) {
+        const upstream = (error as MCPToolError).upstream;
+        if (upstream instanceof Error) {
+          upstreamSerialized = {
+            __error__: true,
+            name: upstream.name,
+            message: upstream.message,
+            stack: upstream.stack,
+          };
+        } else {
+          try {
+            upstreamSerialized = JSON.parse(JSON.stringify(upstream));
+          } catch {
+            upstreamSerialized = String(upstream);
+          }
+        }
+      }
+
       const response: ToolCallResponse = {
         error: {
           type: isMcpToolError ? 'mcp_tool_error' : 'tool_error',
@@ -541,6 +570,7 @@ export class HttpBridge {
             code: (error as MCPToolError).code,
             server: (error as MCPToolError).server,
             tool: (error as MCPToolError).tool,
+            upstream: upstreamSerialized,
           }),
         },
         metrics: {
