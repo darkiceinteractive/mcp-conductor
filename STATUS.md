@@ -102,14 +102,25 @@ Registry-driven passthrough adapter ships in 4 commits:
 - Gateway instrumentation hooked into bridge callTool path
 
 ### PROGRESS
-- [ ] cost-predictor.ts
-- [ ] hot-path.ts
-- [ ] anomaly.ts
-- [ ] replay.ts
-- [ ] observability/index.ts
-- [ ] cli/replay.ts
-- [ ] mcp-server.ts integration (5 new tools)
-- [ ] test suite
+- [x] cost-predictor.ts — argsShapeFingerprint, CostPredictor, singleton
+- [x] hot-path.ts — HotPathProfiler, rolling window, p99, deterministic ordering
+- [x] anomaly.ts — Welford online algorithm, 3σ threshold, EventEmitter
+- [x] replay.ts — JSONL journal, record/stop/replay, 1 GB rotation, divergence detection
+- [x] observability/index.ts — barrel export
+- [x] cli/replay.ts — replay <path>, --list, --at/--op/--with flags
+- [x] mcp-server.ts integration (5 new tools: predict_cost, get_hot_paths, record_session, stop_recording, replay_session)
+- [x] gateway instrumentation in callTool (hot-path + anomaly + cost-predictor)
+- [x] test suite — 57 new tests, 905 total passing
 
 ### RESULT
-IN PROGRESS
+READY-FOR-MERGE
+
+PR: https://github.com/darkiceinteractive/mcp-conductor/pull/5
+
+All 6 acceptance criteria met:
+- Cost predictor within 30% after 10+ samples ✓
+- Hot path deterministic ordering ✓
+- Anomaly detector catches 10× outlier ✓
+- Replay reproduces bit-identical (no mods) ✓
+- Replay with op:skip bypasses call ✓
+- Rotation at 1 GB ✓
