@@ -24,6 +24,16 @@ import { shutdownSkillsEngine } from '../skills/index.js';
 import type { MCPExecutorConfig, ExecutionMode, ConductorConfig } from '../config/index.js';
 import { loadConductorConfig, saveConductorConfig, getDefaultConductorConfigPath } from '../config/index.js';
 import { VERSION } from '../version.js';
+import {
+  getCostPredictor,
+  getHotPathProfiler,
+  getAnomalyDetector,
+  getReplayRecorder,
+  shutdownCostPredictor,
+  shutdownHotPathProfiler,
+  shutdownAnomalyDetector,
+  shutdownReplayRecorder,
+} from '../observability/index.js';
 
 /**
  * MCP Executor Server
@@ -1479,6 +1489,179 @@ Triggers a reload to apply changes immediately.`,
         };
       }
     );
+    // Register predict_cost tool
+    this.server.registerTool(
+      'predict_cost',
+      {
+        title: 'Predict Cost',
+        description: 'Predict the token cost and latency of executing code based on historical samples for similar call patterns.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          code: z.string().describe('The code whose cost you want to estimate.'),
+        },
+        outputSchema: {
+          estimatedInputTokens: z.number(),
+          estimatedOutputTokens: z.number(),
+          estimatedLatencyMs: z.number(),
+          basedOn: z.number(),
+          available: z.boolean(),
+        },
+      },
+      async ({ code }) => {
+        const predictor = getCostPredictor();
+        const prediction = predictor.predictFromCode(code);
+        const output = prediction
+          ? { ...prediction, available: true }
+          : { estimatedInputTokens: 0, estimatedOutputTokens: 0, estimatedLatencyMs: 0, basedOn: 0, available: false };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
+    // Register get_hot_paths tool
+    this.server.registerTool(
+      'get_hot_paths',
+      {
+        title: 'Get Hot Paths',
+        description: 'Return the top-K tool call paths by total latency or p99 within a rolling time window.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sinceMs: z.number().optional().describe('Only include calls made in the last N milliseconds.'),
+          topK: z.number().optional().describe('Maximum number of paths to return (default: 10).'),
+          sortBy: z.enum(['totalLatency', 'p99', 'callCount']).optional().describe('Ranking dimension (default: totalLatency).'),
+        },
+        outputSchema: {
+          paths: z.array(z.object({
+            server: z.string(),
+            tool: z.string(),
+            callCount: z.number(),
+            totalLatencyMs: z.number(),
+            meanLatencyMs: z.number(),
+            p99LatencyMs: z.number(),
+          })),
+        },
+      },
+      async ({ sinceMs, topK, sortBy }) => {
+        const profiler = getHotPathProfiler();
+        const paths = profiler.getHotPaths({
+          sinceMs,
+          topK: topK ?? 10,
+          sortBy: sortBy ?? 'totalLatency',
+        });
+        const output = { paths };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
+    // Register record_session tool
+    this.server.registerTool(
+      'record_session',
+      {
+        title: 'Record Session',
+        description: 'Start recording all tool calls in the current session to a replay journal.',
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sessionId: z.string().optional().describe('Optional session ID. A UUID is generated if omitted.'),
+        },
+        outputSchema: {
+          sessionId: z.string(),
+          recordingPath: z.string(),
+        },
+      },
+      async ({ sessionId }) => {
+        const recorder = getReplayRecorder();
+        const result = recorder.startRecording(sessionId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+          structuredContent: result,
+        };
+      }
+    );
+
+    // Register stop_recording tool
+    this.server.registerTool(
+      'stop_recording',
+      {
+        title: 'Stop Recording',
+        description: 'Stop an active recording session and finalise the replay journal.',
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          sessionId: z.string().describe('Session ID returned by record_session.'),
+        },
+        outputSchema: {
+          recordingPath: z.string(),
+          eventCount: z.number(),
+        },
+      },
+      async ({ sessionId }) => {
+        const recorder = getReplayRecorder();
+        const result = recorder.stopRecording(sessionId);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+          structuredContent: result,
+        };
+      }
+    );
+
+    // Register replay_session tool
+    this.server.registerTool(
+      'replay_session',
+      {
+        title: 'Replay Session',
+        description: 'Replay a recorded session, optionally applying modifications. Detects divergence when replayed result differs from recorded result.',
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          recordingPath: z.string().describe('Path to the .jsonl recording file.'),
+          modifications: z.array(z.object({
+            at: z.number().describe('Zero-based sequence index to target.'),
+            op: z.enum(['replace', 'skip']).describe('Operation: replace the result or skip the event.'),
+            with: z.unknown().optional().describe('Replacement value for replace operation.'),
+          })).optional().describe('Optional list of modifications to apply during replay.'),
+        },
+        outputSchema: {
+          result: z.unknown(),
+          divergence: z.object({
+            at: z.number(),
+            expected: z.unknown(),
+            actual: z.unknown(),
+          }).optional(),
+        },
+      },
+      async ({ recordingPath, modifications }) => {
+        const recorder = getReplayRecorder();
+        const { result, divergence } = recorder.replay(recordingPath, modifications ?? []);
+        const output = { result, divergence };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
   }
 
   /**
@@ -1539,8 +1722,21 @@ Triggers a reload to apply changes immediately.`,
 
           throw new Error(`Unknown tool: ${serverName}.${toolName}`);
         } else {
-          // Use real hub for tool calls
-          return await this.hub.callTool(serverName, toolName, params);
+          // Use real hub for tool calls — instrument for observability
+          const _obsStart = Date.now();
+          const _obsResult = await this.hub.callTool(serverName, toolName, params);
+          const _obsLatency = Date.now() - _obsStart;
+          const _obsResultStr = JSON.stringify(_obsResult ?? '');
+          // Feed hot-path profiler
+          getHotPathProfiler().record(serverName, toolName, _obsLatency);
+          // Feed anomaly detector
+          getAnomalyDetector().record(serverName, toolName, _obsLatency, _obsResultStr.length);
+          // Feed cost predictor
+          getCostPredictor().record(serverName, toolName, params as Record<string, unknown>, {
+            outputText: _obsResultStr,
+            latencyMs: _obsLatency,
+          });
+          return _obsResult;
         }
       },
 
@@ -1630,6 +1826,10 @@ Triggers a reload to apply changes immediately.`,
     shutdownMetricsCollector();
     shutdownModeHandler();
     shutdownSkillsEngine();
+    shutdownCostPredictor();
+    shutdownHotPathProfiler();
+    shutdownAnomalyDetector();
+    shutdownReplayRecorder();
 
     // 4. Stop HTTP bridge last (Deno processes may still be calling it during cleanup)
     await this.bridge.stop();

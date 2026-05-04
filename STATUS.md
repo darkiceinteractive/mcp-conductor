@@ -81,3 +81,35 @@ Registry-driven passthrough adapter ships in 4 commits:
 - [x] preloadHelpers[] list accepted by worker bootstrap (Phase 5 plug-in point)
 
 ## READY-FOR-MERGE
+# Sprint STATUS
+
+## Agent G — Phase 7: Observability + Replay
+
+### START CHECKPOINT
+- **Started:** 2026-05-04
+- **Branch:** feature/v3-phase-7
+- **Baseline:** 848 tests passing (1 skipped), 41 test files
+- **Rebased onto:** origin/feature/v3-phase-0-1 ✓
+
+### Scope
+- `src/observability/cost-predictor.ts` — rolling per-(tool, args-shape-fingerprint) history, predicts tokens/latency
+- `src/observability/hot-path.ts` — latency/volume profiler with rolling window and p99
+- `src/observability/anomaly.ts` — 3σ outlier detection per (server, tool)
+- `src/observability/replay.ts` — record/replay execute_code calls with .jsonl journals
+- `src/observability/index.ts` — barrel export
+- `src/cli/replay.ts` — CLI subcommand for replay
+- 5 new MCP tools: predict_cost, get_hot_paths, record_session, stop_recording, replay_session
+- Gateway instrumentation hooked into bridge callTool path
+
+### PROGRESS
+- [ ] cost-predictor.ts
+- [ ] hot-path.ts
+- [ ] anomaly.ts
+- [ ] replay.ts
+- [ ] observability/index.ts
+- [ ] cli/replay.ts
+- [ ] mcp-server.ts integration (5 new tools)
+- [ ] test suite
+
+### RESULT
+IN PROGRESS
