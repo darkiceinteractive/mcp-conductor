@@ -38,7 +38,28 @@ Format per checkpoint:
 ## Agent B — PRD Phase 2 Cache layer
 **Branch**: `feature/v3-phase-2` · **Worktree**: `B-phase-2/` · **Blocked by**: A's Phase 1
 
-_(awaiting agent)_
+[2026-05-04 16:25 AEDT] START — worktree verified, rebased onto origin/feature/v3-phase-0-1 cleanly.
+  Baseline: 848 tests passing. Kickoff doc + PRD §5 Phase 2 read in full.
+  Registry API (ToolDefinition.cacheable/.cacheTtl, tool-updated events, watch()) understood.
+
+[2026-05-04 16:25 AEDT] ✓ Implementation complete — 60 new tests all passing (908 total, 0 regressions).
+  Files created:
+    src/cache/key.ts       — stableJsonStringify + sha256 content addressing
+    src/cache/policy.ts    — TTL policy table + per-server overrides + ToolDefinition annotations
+    src/cache/lru.ts       — MemoryLru with byte-aware eviction (lru-cache v11)
+    src/cache/disk.ts      — CBOR disk cache (cbor-x), atomic writes, prefix scan invalidation
+    src/cache/delta.ts     — structural diff (array add/remove, object property change)
+    src/cache/cache.ts     — CacheLayer composition; SWR; registry tool-updated invalidation
+    src/cache/index.ts     — public exports
+    test/unit/cache/key.test.ts   (13 tests)
+    test/unit/cache/lru.test.ts   (9 tests)
+    test/unit/cache/disk.test.ts  (7 tests)
+    test/unit/cache/delta.test.ts (15 tests)
+    test/unit/cache/cache.test.ts (16 tests)
+  All acceptance criteria met per PRD §5 Phase 2.
+[2026-05-04 16:28 AEDT] READY-FOR-MERGE: https://github.com/darkiceinteractive/mcp-conductor/pull/8
+  908 tests passing (848 baseline + 60 new), 0 lint errors, build clean.
+  All PRD §5 Phase 2 acceptance criteria met. Agent C can plug in behind cache.get().
 
 ---
 
