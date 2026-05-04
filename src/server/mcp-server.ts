@@ -11,6 +11,9 @@ import { logger } from '../utils/index.js';
 import { HttpBridge, type BridgeHandlers, type ServerInfo } from '../bridge/index.js';
 import { DenoExecutor, type ExecutionResult } from '../runtime/index.js';
 import { MCPHub } from '../hub/index.js';
+import { ToolRegistry } from '../registry/registry.js';
+import { applyBuiltInRecommendations } from '../registry/built-in-recommendations.js';
+import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
 import { MetricsCollector } from '../metrics/index.js';
@@ -36,6 +39,7 @@ export class MCPExecutorServer {
   private config: MCPExecutorConfig;
   private useMockServers: boolean;
   private currentMode: ExecutionMode;
+  private registry: ToolRegistry;
 
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
@@ -97,6 +101,12 @@ export class MCPExecutorServer {
       reconnectDelayMs: 5000,
       maxReconnectAttempts: 3,
     });
+
+    // Initialise the ToolRegistry backed by the hub.
+    // registry.refresh() + registerPassthroughTools() are called in start()
+    // after the hub has connected, so the registry is fully populated before
+    // any passthrough tool handler can be invoked.
+    this.registry = new ToolRegistry({ bridge: this.hub });
 
     // Set up mock servers for fallback/testing
     this.setupMockServers();
@@ -1484,6 +1494,16 @@ Triggers a reload to apply changes immediately.`,
         connected: stats.connected,
         total: stats.total,
       });
+
+      // Populate the registry from the now-connected hub, apply built-in
+      // routing recommendations for known servers, then register all
+      // `routing: "passthrough"` tools as first-class MCP tools.
+      await this.registry.refresh();
+      applyBuiltInRecommendations(
+        this.registry.getAllTools(),
+        (server, name, meta) => this.registry.annotate(server, name, meta)
+      );
+      registerPassthroughTools(this.registry, this.server, this.hub);
     }
 
     // Set up bridge handlers
