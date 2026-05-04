@@ -38,12 +38,12 @@ import {
   findClaudeConfigsWithServers,
   importServers,
   formatImportResults,
-  stripServersFromConfig,
-  writeBackup,
 } from '../cli/commands/import-servers.js';
 import { exportToClaude } from '../cli/commands/export-servers.js';
 import { testServer } from '../cli/commands/test-server.js';
 import { getRoutingRecommendations } from '../cli/commands/routing.js';
+import { CacheLayer } from '../cache/index.js';
+import { ReliabilityGateway } from '../reliability/index.js';
 
 /**
  * MCP Executor Server
@@ -60,6 +60,8 @@ export class MCPExecutorServer {
   private useMockServers: boolean;
   private currentMode: ExecutionMode;
   private registry: ToolRegistry;
+  private cache: CacheLayer;
+  private gateway: ReliabilityGateway;
 
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
@@ -127,6 +129,12 @@ export class MCPExecutorServer {
     // after the hub has connected, so the registry is fully populated before
     // any passthrough tool handler can be invoked.
     this.registry = new ToolRegistry({ bridge: this.hub });
+
+    // Initialise cache layer (three-tier: memory LRU + disk CBOR + delta).
+    this.cache = new CacheLayer({ registry: this.registry });
+
+    // Initialise reliability gateway (timeout + retry + circuit breaker).
+    this.gateway = new ReliabilityGateway({});
 
     // Set up mock servers for fallback/testing
     this.setupMockServers();
@@ -1712,9 +1720,13 @@ Optionally strips the imported servers from their source configs.`,
           return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
         }
 
+        // Pass removeOriginals only when actually importing (doImport=true).
+        // Even though importServers() guards the strip on !dryRun internally,
+        // being explicit here prevents accidental destruction if the function
+        // contract ever changes (HIGH-4 defense-in-depth).
         const results = importServers({
           yes: true,
-          removeOriginals: remove_originals ?? false,
+          removeOriginals: (remove_originals ?? false) && doImport,
           dryRun: !doImport,
         });
 
@@ -1739,19 +1751,15 @@ Optionally strips the imported servers from their source configs.`,
       'test_server',
       {
         title: 'Test Server',
-        description: `Transiently connect to an MCP server, list its tools and measure latency.
-Does NOT persist the connection or register the server. Safe to call on any server definition.
-Provide either a name (looks up conductor config) or command+args directly.`,
+        description: `Transiently connect to a named MCP server from conductor config, list its tools and measure latency.
+Does NOT persist the connection or register the server. The server must be present in ~/.mcp-conductor.json.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
-          openWorldHint: true,
+          openWorldHint: false,
         },
         inputSchema: {
-          name: z.string().optional().describe('Server name in conductor config to test.'),
-          command: z.string().optional().describe('Direct command to run (bypasses config lookup).'),
-          args: z.array(z.string()).optional().describe('Arguments for the command.'),
-          env: z.record(z.string()).optional().describe('Environment variables for the command.'),
+          name: z.string().describe('Server name in conductor config to test.'),
           timeout_ms: z.number().optional().default(15000).describe('Connection timeout in milliseconds.'),
         },
         outputSchema: {
@@ -1764,8 +1772,8 @@ Provide either a name (looks up conductor config) or command+args directly.`,
           error: z.string().optional(),
         },
       },
-      async ({ name, command, args, env, timeout_ms }) => {
-        const result = await testServer({ name, command, args, env, timeoutMs: timeout_ms ?? 15000 });
+      async ({ name, timeout_ms }) => {
+        const result = await testServer({ name, timeoutMs: timeout_ms ?? 15000 });
         const output = {
           success: result.success,
           server_name: result.serverName,
@@ -1985,11 +1993,11 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
           const toolDef = this.registry.getTool(serverName, toolName);
           const matchers = toolDef?.redact?.response ?? [];
 
-          // Use real hub for tool calls — instrument for observability
-          const _obsStart = Date.now();
-
+          // X4 tokenization path: PII-redacted results use per-call nonces so
+          // caching would store tokenized values that cannot be reverse-mapped
+          // after a cache eviction. Skip cache for this path.
           if (matchers.length > 0) {
-            // Tokenize PII before the result reaches the sandbox
+            const _obsStart = Date.now();
             const { result, reverseMap } = await this.hub.callToolTokenized(
               serverName,
               toolName,
@@ -2008,18 +2016,53 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
             return { __x4_result: result, __x4_reverseMap: reverseMap };
           }
 
-          const _obsResult = await this.hub.callTool(serverName, toolName, params);
+          // Standard path: cache check → reliability gateway → backend → cache set.
+          const cacheable = this.cache.wouldCache(serverName, toolName);
+
+          if (cacheable) {
+            const hit = await this.cache.get(serverName, toolName, params);
+            if (hit) {
+              if (!hit.needsRevalidation) {
+                // Fresh cache hit — return immediately
+                return hit.value;
+              }
+              // Stale-while-revalidate: return stale value, kick off background refresh
+              this.cache.refreshInBackground(serverName, toolName, params, () =>
+                this.gateway.call(serverName, toolName, () =>
+                  this.hub.callTool(serverName, toolName, params)
+                )
+              ).catch((err) =>
+                logger.warn('SWR background refresh failed', {
+                  serverName,
+                  toolName,
+                  err: String(err),
+                })
+              );
+              return hit.value;
+            }
+          }
+
+          // Cache miss (or non-cacheable): call through reliability gateway
+          const _obsStart = Date.now();
+          const _obsResult = await this.gateway.call(serverName, toolName, () =>
+            this.hub.callTool(serverName, toolName, params)
+          );
           const _obsLatency = Date.now() - _obsStart;
           const _obsResultStr = JSON.stringify(_obsResult ?? '');
-          // Feed hot-path profiler
+
+          // Feed observability singletons
           getHotPathProfiler().record(serverName, toolName, _obsLatency);
-          // Feed anomaly detector
           getAnomalyDetector().record(serverName, toolName, _obsLatency, _obsResultStr.length);
-          // Feed cost predictor
           getCostPredictor().record(serverName, toolName, params as Record<string, unknown>, {
             outputText: _obsResultStr,
             latencyMs: _obsLatency,
           });
+
+          // Populate cache for future calls
+          if (cacheable) {
+            await this.cache.set(serverName, toolName, params, _obsResult);
+          }
+
           return _obsResult;
         }
       },
@@ -2105,7 +2148,10 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       await this.hub.shutdown();
     }
 
-    // 3. Shutdown global singletons (intervals, listeners, caches)
+    // 3. Destroy cache layer (unsubscribes registry watcher)
+    this.cache.destroy();
+
+    // 4. Shutdown global singletons (intervals, listeners, caches)
     shutdownStreamManager();
     shutdownMetricsCollector();
     shutdownModeHandler();

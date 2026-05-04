@@ -63,7 +63,8 @@ const EXPECTED: Record<string, ToolAnnotations> = {
   update_server:                { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: false },
   // X2 lifecycle tools
   import_servers_from_claude:   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  test_server:                  { readOnlyHint: true,  idempotentHint: true,  openWorldHint: true },
+  // CRIT-5: test_server now accepts only a config-registered name, not arbitrary commands
+  test_server:                  { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
   diagnose_server:              { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
   recommend_routing:            { readOnlyHint: false, idempotentHint: true,  openWorldHint: false },
   export_to_claude:             { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },

@@ -80,6 +80,44 @@ export function buildPassthroughToolName(server: string, tool: string): string {
 }
 
 /**
+ * Conductor built-in tool names that are always registered by
+ * `MCPExecutorServer.registerTools()`. Any passthrough tool whose composed
+ * name matches one of these entries will be skipped to prevent duplicate-
+ * registration errors at the SDK level (CODE-LOW-4).
+ *
+ * Keep this set in sync with the `this.server.registerTool(name, ...)` calls
+ * in `mcp-server.ts`. The check uses the raw composed name (`server__tool`
+ * form) so a plain backend tool named `brave_web_search` registered under any
+ * server would collide with the conductor built-in of the same name.
+ */
+export const STATIC_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'execute_code',
+  'list_servers',
+  'discover_tools',
+  'get_metrics',
+  'set_mode',
+  'reload_servers',
+  'get_capabilities',
+  'compare_modes',
+  'passthrough_call',
+  'brave_web_search',
+  'add_server',
+  'remove_server',
+  'update_server',
+  'get_memory_stats',
+  'predict_cost',
+  'get_hot_paths',
+  'record_session',
+  'stop_recording',
+  'replay_session',
+  'import_servers_from_claude',
+  'test_server',
+  'diagnose_server',
+  'recommend_routing',
+  'export_to_claude',
+]);
+
+/**
  * Register all `routing: "passthrough"` tools from the registry as
  * first-class MCP tools on `mcpServer`.
  *
@@ -88,15 +126,19 @@ export function buildPassthroughToolName(server: string, tool: string): string {
  * same server instance the SDK will throw a duplicate-name error, so callers
  * must ensure it runs only once per server lifecycle.
  *
- * @param registry   Populated ToolRegistry (after `refresh()` has been called).
- * @param mcpServer  The McpServer instance to register tools on.
- * @param mcpHub     The MCPHub used to forward tool calls to backends.
- * @returns          The number of passthrough tools registered.
+ * @param registry      Populated ToolRegistry (after `refresh()` has been called).
+ * @param mcpServer     The McpServer instance to register tools on.
+ * @param mcpHub        The MCPHub used to forward tool calls to backends.
+ * @param excludeNames  Additional composed names to skip beyond the built-in
+ *                      {@link STATIC_TOOL_NAMES} set (e.g. names already
+ *                      registered by a previous call).
+ * @returns             The number of passthrough tools registered.
  */
 export function registerPassthroughTools(
   registry: ToolRegistry,
   mcpServer: McpServerLike,
-  mcpHub: McpHubLike
+  mcpHub: McpHubLike,
+  excludeNames?: ReadonlySet<string>
 ): number {
   const tools = registry.getAllTools();
   let registered = 0;
@@ -107,6 +149,15 @@ export function registerPassthroughTools(
     }
 
     const composedName = buildPassthroughToolName(tool.server, tool.name);
+
+    // Skip names that collide with conductor built-ins or caller exclusions (CODE-LOW-4).
+    if (STATIC_TOOL_NAMES.has(composedName) || excludeNames?.has(composedName)) {
+      logger.warn(
+        `Passthrough registrar: skipping '${composedName}' — name conflicts with a statically-registered tool`,
+        { server: tool.server, tool: tool.name }
+      );
+      continue;
+    }
 
     // Build an inputSchema for the SDK from the tool's JSON Schema properties.
     // Each property is typed as z.unknown() (required) or z.unknown().optional()
