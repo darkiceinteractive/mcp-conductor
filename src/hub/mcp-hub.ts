@@ -21,6 +21,7 @@ import {
   findConductorConfig,
 } from '../config/loader.js';
 import type { ClaudeConfig, ServersConfig, ConductorConfig, RateLimitConfig } from '../config/schema.js';
+import { MCPToolError, extractErrorCode } from '../reliability/errors.js';
 
 export type ServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -674,9 +675,14 @@ export class MCPHub extends EventEmitter {
 
       return result;
     } catch (error) {
+      // Never double-wrap an MCPToolError — propagate as-is.
+      if (error instanceof MCPToolError) throw error;
+
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Tool call failed: ${serverName}.${toolName}`, { error: errorMessage, params });
-      throw new Error(`Tool call failed: ${serverName}.${toolName} - ${errorMessage}`);
+
+      const code = extractErrorCode(error);
+      throw new MCPToolError(code, serverName, toolName, error);
     }
   }
 
