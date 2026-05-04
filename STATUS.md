@@ -124,3 +124,24 @@ All 6 acceptance criteria met:
 - Replay reproduces bit-identical (no mods) ✓
 - Replay with op:skip bypasses call ✓
 - Rotation at 1 GB ✓
+# MCP Conductor v3 Sprint — STATUS
+
+## Agent F — Phase 6: Daemon Mode + Multi-Agent Coordination
+
+### Checkpoint: START
+- **Date**: 2026-05-04
+- **Branch**: feature/v3-phase-6
+- **Baseline**: 848 tests passing (41 test files)
+- **Rebased on**: origin/feature/v3-phase-0-1 (Agent A registry foundation) — clean
+- **Status**: IN PROGRESS
+
+### Scope
+- `src/daemon/server.ts` — Unix socket + optional TCP daemon server
+- `src/daemon/client.ts` — thin agent-side bridge (stdio to daemon)
+- `src/daemon/discovery.ts` — Tailscale peer discovery
+- `src/daemon/shared-kv.ts` — in-memory + disk-persistent KV with TTL
+- `src/daemon/shared-lock.ts` — in-process mutex per key
+- `src/daemon/index.ts` — daemon entry point / public exports
+- `src/cli/daemon.ts` — daemon CLI subcommands (start/stop/status/logs)
+- `test/unit/daemon/` — unit tests for all daemon modules
+- `test/integration/daemon/` — two-agent integration scenarios
