@@ -33,7 +33,10 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:perf": "vitest run test/perf",
+    "test:perf:bench": "vitest bench test/perf",
+    "test:coverage:check": "vitest run --coverage"
   },
   "keywords": [
     "mcp",
