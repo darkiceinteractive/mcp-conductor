@@ -29,6 +29,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
   - B5: `import_servers_from_claude` summary scrubs env values and inline tokens.
 - **T1 — Performance benchmark suite** scaffolded at `test/perf/` (cold-start, warm-call, passthrough-call, tokenize-throughput implemented; cache-hit, bridge-throughput, registry-refresh stubbed). New scripts: `npm run test:perf` (CI gate) and `npm run test:perf:bench` (throughput report).
 - **T8 — Coverage thresholds** enforced via `vitest.config.ts` per-module table; new `npm run test:coverage:check` script. Thresholds calibrated to current actuals (80% overall, per-module floors) with ratchet plan documented in `docs/dev/coverage-targets.md`.
+- **D7a — Article authoring pipeline** (`scripts/build-articles.ts`):
+  - Source: `articles/<slug>/article.md` (single MD source per article)
+  - Outputs: HTML + MD + Medium-MD + SVG diagrams + PNG fallbacks
+  - Mermaid (`` ```mermaid ``) blocks render to SVG via `@mermaid-js/mermaid-cli`
+  - Hand-authored SVG support via `articles/<slug>/svg-source/*.svg`
+  - New scripts: `npm run build:articles`, `npm run build:articles:watch`
+  - Sample article at `articles/_sample/` proves the pipeline works
 
 ---
 
