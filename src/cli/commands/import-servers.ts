@@ -141,8 +141,25 @@ export function importServers(options: ImportOptions = {}): ImportResult[] {
   return results;
 }
 
+// B5: Regex to detect and redact inline token-style flags in command/args strings.
+// Matches patterns like --token=VALUE, --api-key=VALUE, --secret=VALUE, --password=VALUE.
+// The value portion is replaced with *** so the key name remains visible.
+const INLINE_TOKEN_RE = /(--(?:token|api[-_]?key|secret|password|auth|credentials?)[=])\S+/gi;
+
+/**
+ * B5: Redact inline token-style flags from a command or argument string.
+ * e.g. "--token=abc123" becomes "--token=***"
+ */
+function redactInlineTokens(str: string): string {
+  return str.replace(INLINE_TOKEN_RE, '$1***');
+}
+
 /**
  * Format import results as human-readable text (for CLI output).
+ *
+ * B5: env values are never included in the output — only key names are shown.
+ * Inline token-style flags in command/args are redacted to prevent accidental
+ * secret exposure in logs or MCP response summaries.
  */
 export function formatImportResults(results: ImportResult[], dryRun = false): string {
   if (results.length === 0) {
@@ -158,7 +175,16 @@ export function formatImportResults(results: ImportResult[], dryRun = false): st
     if (r.imported.length > 0) {
       lines.push(`  ${dryRun ? 'Would import' : 'Imported'} (${r.imported.length}):`);
       for (const s of r.imported) {
-        lines.push(`    + ${s.name}  [${s.command}${s.args?.length ? ' ' + s.args.join(' ') : ''}]`);
+        // B5: Redact inline token flags before rendering command/args.
+        const safeCommand = redactInlineTokens(s.command);
+        const safeArgs = s.args?.map(redactInlineTokens) ?? [];
+        const cmdStr = `${safeCommand}${safeArgs.length ? ' ' + safeArgs.join(' ') : ''}`;
+
+        // B5: Show only env key names — never values.
+        const envKeys = Object.keys(s.env ?? {});
+        const envStr = envKeys.length > 0 ? `  env: [${envKeys.join(', ')}]` : '';
+
+        lines.push(`    + ${s.name}  [${cmdStr}]${envStr}`);
       }
     }
     if (r.skipped.length > 0) {

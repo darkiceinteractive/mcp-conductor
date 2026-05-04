@@ -31,7 +31,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { DaemonServer } from '../../../src/daemon/server.js';
+import { loadOrCreateSecret } from '../../../src/daemon/server.js';
 import { DaemonClient } from '../../../src/daemon/client.js';
 
 // ---------------------------------------------------------------------------
@@ -49,26 +49,22 @@ function writeAuthFile(dir: string, secret: string): string {
   return authPath;
 }
 
-function makeServer(dir: string, authPath: string): DaemonServer {
-  return new DaemonServer({
-    socketPath: join(dir, 'daemon.sock'),
-    auth: { sharedSecretPath: authPath },
-    kvOptions: { persistDir: join(dir, 'kv'), skipLoad: true, sweepIntervalMs: 999_999 },
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Server — loadOrCreateSecret (exercised via DaemonServer constructor)
 // ---------------------------------------------------------------------------
 
+// B4 note: DaemonServer's sharedSecretPath must resolve within CONDUCTOR_DIR
+// (~/.mcp-conductor). Tests cannot write to that real directory, so tests 1-4
+// call loadOrCreateSecret() directly (exported @internal) to verify its
+// TOCTOU-safe behaviour without going through the B4 path guard.
 describe('MED-1 server: loadOrCreateSecret TOCTOU fix', () => {
   it('1. loads sharedSecret when file exists with valid JSON', () => {
     const dir = makeTempDir();
     try {
-      const authPath = writeAuthFile(dir, 'known-secret-value-abc123');
-      // Constructor must not throw; stats() is a lightweight sanity check.
-      const server = makeServer(dir, authPath);
-      expect(() => server.stats()).not.toThrow();
+      const authPath = join(dir, 'daemon-auth.json');
+      writeFileSync(authPath, JSON.stringify({ sharedSecret: 'known-secret-value-abc123' }), { mode: 0o600, encoding: 'utf-8' });
+      const secret = loadOrCreateSecret(authPath);
+      expect(secret).toBe('known-secret-value-abc123');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -77,10 +73,11 @@ describe('MED-1 server: loadOrCreateSecret TOCTOU fix', () => {
   it('2. generates a new secret when the auth file does not exist (no throw)', () => {
     const dir = makeTempDir();
     try {
-      // authPath points inside an existing dir but the file itself is absent.
       const authPath = join(dir, 'daemon-auth.json');
-      const server = makeServer(dir, authPath);
-      expect(() => server.stats()).not.toThrow();
+      // File does not exist → should generate and return a new secret without throwing.
+      const secret = loadOrCreateSecret(authPath);
+      expect(typeof secret).toBe('string');
+      expect(secret.length).toBeGreaterThan(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -91,8 +88,7 @@ describe('MED-1 server: loadOrCreateSecret TOCTOU fix', () => {
     try {
       const authPath = join(dir, 'daemon-auth.json');
       writeFileSync(authPath, 'NOT_VALID_JSON', { mode: 0o600, encoding: 'utf-8' });
-
-      expect(() => makeServer(dir, authPath)).toThrow(SyntaxError);
+      expect(() => loadOrCreateSecret(authPath)).toThrow(SyntaxError);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -101,17 +97,18 @@ describe('MED-1 server: loadOrCreateSecret TOCTOU fix', () => {
   it('4. race simulation: file deleted just before readFileSync → ENOENT treated as not-found, generates new secret', () => {
     const dir = makeTempDir();
     try {
-      // Write a valid auth file…
-      const authPath = writeAuthFile(dir, 'will-be-deleted');
-      // …then delete it to simulate the TOCTOU race window where the file
-      // disappears between a hypothetical existsSync check and the read.
+      // Write a valid auth file then delete it to simulate the TOCTOU race window.
+      const authPath = join(dir, 'daemon-auth.json');
+      writeFileSync(authPath, JSON.stringify({ sharedSecret: 'will-be-deleted' }), { mode: 0o600, encoding: 'utf-8' });
       unlinkSync(authPath);
 
-      // Under the old existsSync + readFileSync pattern this would never have
-      // been reached (existsSync returned false). Under the new try/catch pattern
+      // Under the old existsSync + readFileSync pattern existsSync returned false
+      // and the function wouldn't even try to read. Under the new try/catch pattern
       // the ENOENT from readFileSync must be caught and treated as not-found
       // → generate a new secret without throwing.
-      expect(() => makeServer(dir, authPath)).not.toThrow();
+      const secret = loadOrCreateSecret(authPath);
+      expect(typeof secret).toBe('string');
+      expect(secret.length).toBeGreaterThan(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

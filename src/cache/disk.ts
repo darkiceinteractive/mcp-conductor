@@ -40,6 +40,21 @@ export interface DiskCacheOptions {
 
 const ROTATION_TARGET_RATIO = 0.8;
 
+// B3: Validate a decoded CBOR value conforms to the DiskEntry schema.
+// Returns true when the shape is valid, false when the entry should be
+// discarded. Avoids throwing so callers can log + skip rather than crash.
+function isValidDiskEntry(entry: unknown): entry is DiskEntry {
+  if (entry === null || typeof entry !== 'object') return false;
+  const e = entry as Record<string, unknown>;
+  return (
+    typeof e['storedAt'] === 'number' &&
+    typeof e['ttlMs'] === 'number' &&
+    typeof e['server'] === 'string' &&
+    typeof e['tool'] === 'string' &&
+    e['value'] !== undefined
+  );
+}
+
 export class DiskCache {
   private diskDir: string;
   private maxDiskBytes: number;
@@ -73,7 +88,15 @@ export class DiskCache {
     const path = this.entryPath(argsHash);
     try {
       const buf = await readFile(path);
-      const entry = cborDecode(buf) as DiskEntry;
+      const decoded = cborDecode(buf);
+      // B3: Validate decoded shape before trusting it. A crafted .cbor file
+      // in the cache directory must not be able to inject arbitrary data.
+      if (!isValidDiskEntry(decoded)) {
+        logger.warn('DiskCache: discarding malformed cache entry', { path });
+        this.misses++;
+        return null;
+      }
+      const entry: DiskEntry = decoded;
       this.hits++;
       return {
         value: entry.value,
@@ -192,7 +215,13 @@ export class DiskCache {
         const filePath = join(prefixPath, f);
         try {
           const buf = await readFile(filePath);
-          const entry = cborDecode(buf) as DiskEntry;
+          const decoded = cborDecode(buf);
+          // B3: Discard entries that don't match the DiskEntry schema.
+          if (!isValidDiskEntry(decoded)) {
+            logger.warn('DiskCache: discarding malformed cache entry in scan', { filePath });
+            return;
+          }
+          const entry: DiskEntry = decoded;
           const deleted = await predicate(entry, filePath);
           if (deleted) count++;
         } catch { /* corrupt — skip */ }
@@ -220,7 +249,13 @@ export class DiskCache {
         try {
           const s = await stat(filePath);
           const buf = await readFile(filePath);
-          const entry = cborDecode(buf) as DiskEntry;
+          const decoded = cborDecode(buf);
+          // B3: Skip entries that don't match the DiskEntry schema during rotation.
+          if (!isValidDiskEntry(decoded)) {
+            logger.warn('DiskCache: discarding malformed cache entry in rotate', { filePath });
+            return;
+          }
+          const entry: DiskEntry = decoded;
           entries.push({ filePath, storedAt: entry.storedAt, size: s.size });
         } catch { /* skip */ }
       }));
