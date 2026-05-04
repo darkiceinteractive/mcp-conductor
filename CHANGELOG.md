@@ -19,3 +19,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
   - `MetricsCollector.getTokenSavings(): SessionTokenSavings` for session-level reporting.
   - Wiki: `Metrics-and-Token-Savings.md` updated with reporter documentation, all three modes, example output, and full caveats section.
 - **Docusaurus docs site scaffold (D1)** — first build green, content migration in follow-up block D2.
+- **Daemon hardening cluster (B2 + B3 + B4 + B5)**:
+  - B2: 10MB receive buffer cap on daemon socket; oversized streams destroyed.
+  - B3: CBOR disk cache validates entries post-decode; malformed files discarded with warning.
+  - B4: `sharedSecretPath` validated to resolve within `~/.mcp-conductor`.
+  - B5: `import_servers_from_claude` summary scrubs env values and inline tokens.
