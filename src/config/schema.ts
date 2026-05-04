@@ -106,3 +106,44 @@ export interface ConductorConfig {
   /** MCP servers that conductor will connect to internally */
   servers: Record<string, ConductorServerConfig>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — Connection Pool & Worker Pool configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Connection pool configuration for persistent stdio connections to MCP
+ * backend servers. Reduces cold-start latency by keeping connections alive
+ * and multiplexing JSON-RPC requests over the same stdio channel.
+ */
+export interface ConnectionPoolConfig {
+  /** Minimum idle connections to keep per server (default: 1) */
+  minConnectionsPerServer?: number;
+  /** Maximum simultaneous connections per server (default: 4) */
+  maxConnectionsPerServer?: number;
+  /** Idle connection shutdown timeout in ms (default: 300000 = 5 min) */
+  idleTimeoutMs?: number;
+  /** Timeout for acquiring a connection from the pool (default: 5000) */
+  acquireTimeoutMs?: number;
+}
+
+/**
+ * Warm Deno worker pool configuration. Workers are pre-spawned at startup
+ * so the first execute_code call hits an already-warm sandbox.
+ */
+export interface WorkerPoolConfig {
+  /** Number of warm workers to maintain (default: 4) */
+  size?: number;
+  /** Recycle a worker after this many jobs (default: 100) */
+  maxJobsPerWorker?: number;
+  /** Recycle a worker after this many ms since spawn (default: 600000 = 10 min) */
+  maxAgeMs?: number;
+}
+
+/**
+ * Phase 4 runtime pool configuration block (nested under `runtime` in conductor config).
+ */
+export interface RuntimePoolConfig {
+  workerPool?: WorkerPoolConfig;
+  connectionPool?: ConnectionPoolConfig;
+}

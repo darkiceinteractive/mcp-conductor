@@ -43,3 +43,41 @@ Registry-driven passthrough adapter ships in 4 commits:
 - 11 unit tests covering registrar, name builder, and recommendation logic.
 
 ---
+
+# Agent D — Phase 4 Status
+
+## Checkpoints
+
+### START — 2026-05-04
+- Branch: feature/v3-phase-4
+- Rebased onto: origin/feature/v3-phase-0-1 (Agent A's Phase 0 scaffold)
+- Baseline: 848 tests pass (41 files)
+- Scope: src/bridge/pool.ts + src/runtime/pool/{worker-pool,worker,recycle}.ts + tests
+
+## Progress
+
+- [x] src/config/schema.ts — ConnectionPoolConfig, WorkerPoolConfig, RuntimePoolConfig
+- [x] src/bridge/pool.ts — backend connection pool with JSON-RPC multiplexing
+- [x] src/bridge/index.ts — re-exports pool
+- [x] src/runtime/pool/worker.ts — persistent Deno worker with preload hook for Phase 5
+- [x] src/runtime/pool/recycle.ts — evaluateRecycle / isEligible pure functions
+- [x] src/runtime/pool/worker-pool.ts — warm worker pool, async recycle, queue drain
+- [x] src/runtime/pool/index.ts — public barrel exports
+- [x] src/runtime/index.ts — re-exports pool through runtime barrel
+- [x] test/unit/bridge/pool.test.ts — 17 connection pool assertions
+- [x] test/unit/runtime/worker-pool.test.ts — 11 pool + recycle assertions incl. 1000-job stability
+- [x] PR created
+
+## Test results
+- Baseline: 848 tests (41 files)
+- After Phase 4: 871 tests (43 files) — 23 new tests, 0 regressions
+
+## Acceptance Targets
+- [x] Worker pool pre-warmed at startup (50ms bootstrap delay, first job hits warm worker)
+- [x] Worker recycle does not interrupt in-flight jobs (replacement spawned before termination)
+- [x] 1000-job memory stability test passes (recycle bookkeeping loop, no leaks)
+- [x] Connection pool limits respected (max blocks, timeout rejects)
+- [x] Backend crash → respawn within one event-loop tick
+- [x] preloadHelpers[] list accepted by worker bootstrap (Phase 5 plug-in point)
+
+## READY-FOR-MERGE

@@ -5,3 +5,4 @@
  */
 
 export * from './executor.js';
+export * from './pool/index.js';
