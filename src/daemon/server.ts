@@ -39,6 +39,11 @@ const DEFAULT_AUTH_PATH = join(homedir(), '.mcp-conductor', 'daemon-auth.json');
 const DEFAULT_SOCKET_PATH = join(homedir(), '.mcp-conductor', 'daemon.sock');
 const CONDUCTOR_DIR = join(homedir(), '.mcp-conductor');
 
+// B2: Maximum receive-buffer size per client connection (10 MB).
+// A client that streams data without ever sending a newline would grow the
+// buffer without bound, causing an OOM. Destroy the socket if exceeded.
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
 function loadOrCreateSecret(authPath: string): string {
   // MED-1: open the file directly instead of existsSync + readFileSync to
   // eliminate the TOCTOU window. Treat ENOENT as "not found" and fall through
@@ -307,6 +312,17 @@ export class DaemonServer {
     socket.setEncoding('utf-8');
     socket.on('data', (chunk: string) => {
       buffer += chunk;
+      // B2: Destroy the socket if the receive buffer exceeds the cap.
+      // This prevents an authenticated client from causing OOM by streaming
+      // data without ever sending a newline delimiter.
+      if (buffer.length > MAX_BUFFER_BYTES) {
+        logger.warn('DaemonServer: client exceeded buffer cap, destroying socket', {
+          remote: socket.remoteAddress,
+          bufferLength: buffer.length,
+        });
+        socket.destroy();
+        return;
+      }
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
 
