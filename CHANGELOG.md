@@ -7,6 +7,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0-rc.1] - 2026-05-04
+
+The v3.1 release candidate — hardening, comprehensive tests, public docs site, token-savings reporter, and the first Medium article. 29 blocks shipped over 13 PRs across 3 multi-agent waves. Tag publishes to npm `@next`; promote to `@latest` after 7-day soak.
+
 ### Added
 
 - **D7b — Article 1 source** at `articles/v3-architecture/article.md`. ~1500 words. Architecture overview, 99.7% Anthropic head-to-head benchmark, token-savings reporter example, 3+ Mermaid diagrams. Built artifacts via `npm run build:articles -- --slug=v3-architecture` (HTML + MD + Medium-MD + SVG/PNG diagrams). Owner reviews + clicks Publish on Medium when v3.1 ships.
