@@ -34,6 +34,15 @@ import {
   shutdownAnomalyDetector,
   shutdownReplayRecorder,
 } from '../observability/index.js';
+  findClaudeConfigsWithServers,
+  importServers,
+  formatImportResults,
+  stripServersFromConfig,
+  writeBackup,
+} from '../cli/commands/import-servers.js';
+import { exportToClaude } from '../cli/commands/export-servers.js';
+import { testServer } from '../cli/commands/test-server.js';
+import { getRoutingRecommendations } from '../cli/commands/routing.js';
 
 /**
  * MCP Executor Server
@@ -1630,6 +1639,120 @@ Triggers a reload to apply changes immediately.`,
       {
         title: 'Replay Session',
         description: 'Replay a recorded session, optionally applying modifications. Detects divergence when replayed result differs from recorded result.',
+
+    // ------------------------------------------------------------------
+    // Lifecycle tools (Workstream X2)
+    // ------------------------------------------------------------------
+
+    // import_servers_from_claude
+    this.server.registerTool(
+      'import_servers_from_claude',
+      {
+        title: 'Import Servers from Claude',
+        description: `Import MCP servers from Claude config files into ~/.mcp-conductor.json.
+
+Reads ~/.claude/settings.json, ~/Library/Application Support/Claude/claude_desktop_config.json and other standard paths.
+Shows a diff of what will be imported. On confirm=true, copies entries into the conductor config and writes .bak backups of each source file.
+Optionally strips the imported servers from their source configs.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          confirm: z.boolean().optional().default(false).describe('Set true to actually perform the import. False (default) shows a dry-run diff.'),
+          remove_originals: z.boolean().optional().default(false).describe('After import, remove the imported servers from their source Claude config files.'),
+        },
+        outputSchema: {
+          dry_run: z.boolean(),
+          sources_found: z.number(),
+          total_imported: z.number(),
+          total_skipped: z.number(),
+          summary: z.string(),
+        },
+      },
+      async ({ confirm: doImport, remove_originals }) => {
+        const sources = findClaudeConfigsWithServers();
+        if (sources.length === 0) {
+          const output = { dry_run: !doImport, sources_found: 0, total_imported: 0, total_skipped: 0, summary: 'No Claude config files with MCP servers found.' };
+          return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+        }
+
+        const results = importServers({
+          yes: true,
+          removeOriginals: remove_originals ?? false,
+          dryRun: !doImport,
+        });
+
+        const totalImported = results.reduce((sum, r) => sum + r.imported.length, 0);
+        const totalSkipped = results.reduce((sum, r) => sum + r.skipped.length, 0);
+        const summary = formatImportResults(results, !doImport);
+
+        const output = {
+          dry_run: !doImport,
+          sources_found: sources.length,
+          total_imported: totalImported,
+          total_skipped: totalSkipped,
+          summary,
+        };
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // test_server
+    this.server.registerTool(
+      'test_server',
+      {
+        title: 'Test Server',
+        description: `Transiently connect to an MCP server, list its tools and measure latency.
+Does NOT persist the connection or register the server. Safe to call on any server definition.
+Provide either a name (looks up conductor config) or command+args directly.`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+        inputSchema: {
+          name: z.string().optional().describe('Server name in conductor config to test.'),
+          command: z.string().optional().describe('Direct command to run (bypasses config lookup).'),
+          args: z.array(z.string()).optional().describe('Arguments for the command.'),
+          env: z.record(z.string()).optional().describe('Environment variables for the command.'),
+          timeout_ms: z.number().optional().default(15000).describe('Connection timeout in milliseconds.'),
+        },
+        outputSchema: {
+          success: z.boolean(),
+          server_name: z.string(),
+          connected: z.boolean(),
+          tool_count: z.number(),
+          tools: z.array(z.object({ name: z.string(), description: z.string() })),
+          latency_ms: z.number(),
+          error: z.string().optional(),
+        },
+      },
+      async ({ name, command, args, env, timeout_ms }) => {
+        const result = await testServer({ name, command, args, env, timeoutMs: timeout_ms ?? 15000 });
+        const output = {
+          success: result.success,
+          server_name: result.serverName,
+          connected: result.connected,
+          tool_count: result.toolCount,
+          tools: result.tools,
+          latency_ms: result.latencyMs,
+          ...(result.error ? { error: result.error } : {}),
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // diagnose_server
+    this.server.registerTool(
+      'diagnose_server',
+      {
+        title: 'Diagnose Server',
+        description: `Diagnose a registered MCP server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state.
+Returns actionable information about why a server may be failing.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -1660,6 +1783,133 @@ Triggers a reload to apply changes immediately.`,
           content: [{ type: 'text' as const, text: JSON.stringify(output) }],
           structuredContent: output,
         };
+          name: z.string().describe('Server name to diagnose (must be in conductor config).'),
+        },
+        outputSchema: {
+          server_name: z.string(),
+          status: z.string(),
+          tool_count: z.number(),
+          connected_at: z.string().optional(),
+          last_error: z.string().optional(),
+          reconnect_attempts: z.number(),
+          is_connected: z.boolean(),
+          registry_state: z.object({
+            in_config: z.boolean(),
+            command: z.string().optional(),
+          }),
+          suggestions: z.array(z.string()),
+        },
+      },
+      async ({ name }) => {
+        const servers = this.hub.listServers();
+        const found = servers.find((s) => s.name === name);
+
+        const conductorConfig = loadConductorConfig();
+        const inConfig = !!(conductorConfig?.servers[name]);
+        const configEntry = conductorConfig?.servers[name];
+
+        const suggestions: string[] = [];
+        if (!found && !inConfig) {
+          suggestions.push(`Server '${name}' is not in conductor config. Add it with add_server or import_servers_from_claude.`);
+        } else if (!found) {
+          suggestions.push(`Server '${name}' is in config but not connected. Try reload_servers or restart conductor.`);
+        } else if (found.status === 'error') {
+          suggestions.push(`Server has error status: ${found.lastError ?? 'unknown'}. Check the command path and env vars.`);
+          suggestions.push('Run test_server to verify connectivity.');
+        } else if (found.status === 'disconnected') {
+          suggestions.push('Server is disconnected. Conductor will auto-reconnect; or call reload_servers.');
+        }
+
+        const output = {
+          server_name: name,
+          status: found?.status ?? 'not_registered',
+          tool_count: found?.toolCount ?? 0,
+          connected_at: found?.connectedAt?.toISOString(),
+          last_error: found?.lastError,
+          reconnect_attempts: 0, // hub does not expose per-server attempt count publicly yet
+          is_connected: found?.status === 'connected',
+          registry_state: {
+            in_config: inConfig,
+            command: configEntry?.command,
+          },
+          suggestions,
+        };
+
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // recommend_routing
+    this.server.registerTool(
+      'recommend_routing',
+      {
+        title: 'Recommend Routing',
+        description: `Apply the X1 routing heuristic to one or all configured servers.
+Servers whose names match lightweight-payload patterns (search, calendar, email, etc.) are recommended as "passthrough".
+All others default to "execute_code" (safe default). Use apply=true to write the hints into conductor config.`,
+        annotations: {
+          readOnlyHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          server_name: z.string().optional().describe('Analyse a single server (omit for all servers).'),
+          apply: z.boolean().optional().default(false).describe('Write routing hints to ~/.mcp-conductor.json.'),
+        },
+        outputSchema: {
+          recommendations: z.array(z.object({
+            server_name: z.string(),
+            recommendation: z.enum(['passthrough', 'execute_code']),
+            reason: z.string(),
+          })),
+          applied: z.boolean(),
+          config_path: z.string().optional(),
+        },
+      },
+      async ({ server_name, apply }) => {
+        const result = getRoutingRecommendations({ serverName: server_name, apply: apply ?? false });
+        const output = {
+          recommendations: result.recommendations,
+          applied: result.applied,
+          config_path: result.configPath,
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
+      }
+    );
+
+    // export_to_claude
+    this.server.registerTool(
+      'export_to_claude',
+      {
+        title: 'Export to Claude',
+        description: `Generate a mcpServers JSON block that points Claude back at mcp-conductor stdio.
+This is the rollback path: paste the output into your Claude Desktop or Claude Code config to restore direct connectivity.
+Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers), "raw" (inner object only).`,
+        annotations: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          format: z.enum(['claude-desktop', 'claude-code', 'raw']).optional().default('claude-desktop').describe('Output format.'),
+          conductor_path: z.string().optional().describe('Override the conductor binary path (default: npx @darkiceinteractive/mcp-conductor).'),
+        },
+        outputSchema: {
+          json: z.string(),
+          format: z.string(),
+          server_count: z.number(),
+          instructions: z.string(),
+        },
+      },
+      async ({ format, conductor_path }) => {
+        const result = exportToClaude({ format: format ?? 'claude-desktop', conductorPath: conductor_path });
+        const instructions = format === 'claude-code'
+          ? 'Merge this into ~/.claude/settings.json under the mcpServers key.'
+          : format === 'raw'
+          ? 'Add these entries under the mcpServers key in your Claude config.'
+          : 'Merge this into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or equivalent.';
+        const output = { json: result.json, format: result.format, server_count: result.serverCount, instructions };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }], structuredContent: output };
       }
     );
   }
