@@ -287,6 +287,15 @@ export class DaemonServer {
     const nonce = randomBytes(16).toString('hex');
     this.sendRaw(socket, { id: '__auth_challenge__', result: { nonce } });
 
+    // CRIT-3: close sockets that never complete auth within 10 s → prevents FD exhaustion.
+    const authDeadline = setTimeout(() => {
+      if (!authenticated) {
+        logger.warn('DaemonServer: auth timeout, destroying socket', { remote: socket.remoteAddress });
+        socket.destroy();
+      }
+    }, 10_000);
+    authDeadline.unref();
+
     socket.setEncoding('utf-8');
     socket.on('data', (chunk: string) => {
       buffer += chunk;
@@ -303,7 +312,11 @@ export class DaemonServer {
           if (!authenticated) {
             this.handleAuth(socket, msg, nonce, (ok) => {
               authenticated = ok;
-              if (!ok) socket.destroy();
+              if (ok) {
+                clearTimeout(authDeadline); // CRIT-3: auth succeeded; cancel deadline
+              } else {
+                socket.destroy();
+              }
             });
             return;
           }
@@ -319,6 +332,7 @@ export class DaemonServer {
     });
 
     socket.on('close', () => {
+      clearTimeout(authDeadline);
       // Release all locks held by this client on disconnect.
       for (const [key, handle] of state.lockHandles) {
         handle.release().catch(() => {});
