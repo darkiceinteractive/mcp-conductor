@@ -43,3 +43,30 @@ Registry-driven passthrough adapter ships in 4 commits:
 - 11 unit tests covering registrar, name builder, and recommendation logic.
 
 ---
+
+# Agent D — Phase 4 Status
+
+## Checkpoints
+
+### START — 2026-05-04
+- Branch: feature/v3-phase-4
+- Rebased onto: origin/feature/v3-phase-0-1 (Agent A's Phase 0 scaffold)
+- Baseline: 848 tests pass (41 files)
+- Scope: src/bridge/pool.ts + src/runtime/pool/{worker-pool,worker,recycle}.ts + tests
+
+## Progress
+
+- [ ] src/bridge/pool.ts — backend connection pool
+- [ ] src/runtime/pool/worker.ts — individual worker lifecycle
+- [ ] src/runtime/pool/recycle.ts — recycle policy
+- [ ] src/runtime/pool/worker-pool.ts — warm Deno worker management
+- [ ] src/runtime/pool/index.ts — public exports
+- [ ] Config schema extensions (ConnectionPoolConfig, WorkerPoolConfig)
+- [ ] Tests: worker-pool.test.ts, recycle.test.ts, pool.test.ts (bridge)
+- [ ] PR created
+
+## Acceptance Targets
+- First execute_code <30ms (warm worker)
+- Subsequent <10ms median
+- 1000-job memory stability
+- Worker recycle does not interrupt in-flight jobs
