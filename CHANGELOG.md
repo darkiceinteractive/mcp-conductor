@@ -9,6 +9,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Docs site versioning + custom domain (D3 + D4)**:
+  - D3: Docusaurus multi-version support enabled. v3 (latest) at `/`, v2.0 (alpha) at `/v2`. Version dropdown in navbar.
+  - D4: Cloudflare Pages deployment runbook at `scripts/deploy-docs-pages.md` covering custom domain setup (`docs.darkice.co`), DNS, SSL, branch previews, and troubleshooting.
 - **D2 — v3 docs migrated into Docusaurus** at `docs.darkice.co` (build green; sidebar configured for Architecture, Configuration, Sandbox API, Recipes, Migration).
 - **D5 — CHANGELOG backfilled** to v1.0.0 in Keep a Changelog format.
 - **D6 — README v3.1 refresh** with v3 stats, docs site link, token-savings reporter quick example.
