@@ -144,7 +144,10 @@ _(awaiting agent)_
 ## Agent I — Workstream X2 Lifecycle tools + CLI wizard
 **Branch**: `feature/v3-x2-lifecycle` · **Worktree**: `I-x2/` · **Blocked by**: A's Phase 1 + F's Phase 6
 
-_(awaiting agent)_
+[2026-05-04 16:30 AEDT] START — worktree verified, kickoff doc read, analysis plan read §3 Part C X2.
+  Rebased onto feature/v3-phase-0-1 (Agent A) and feature/v3-phase-6 (Agent F) — both clean.
+  Baseline: 907 tests pass (848 + 59 from F). npm install clean.
+  Plan: 5 MCP tools in mcp-server.ts + src/bin/cli.ts + src/cli/wizard/setup.ts + src/cli/commands/*.ts + tests (~20 cases).
 
 ---
 
