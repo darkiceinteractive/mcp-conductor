@@ -44,6 +44,17 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl: `${GITHUB_URL}/tree/main/docs-site/`,
+          lastVersion: 'current',
+          versions: {
+            current: {
+              label: 'v3 (latest)',
+              path: '/',
+            },
+            '2.0': {
+              label: 'v2.0 (alpha)',
+              path: '/v2',
+            },
+          },
         },
         blog: {
           showReadingTime: true,
@@ -82,6 +93,10 @@ const config: Config = {
           label: 'Docs',
         },
         {to: '/blog', label: 'Blog', position: 'left'},
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
+        },
         {
           href: GITHUB_URL,
           label: 'GitHub',
