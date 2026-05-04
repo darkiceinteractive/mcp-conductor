@@ -37,6 +37,13 @@ export interface MetricsConfig {
   enabled: boolean;
   logToFile: boolean;
   logPath: string | null;
+  /**
+   * When true, every execute_code response automatically includes a
+   * tokenSavings block without requiring the per-call show_token_savings flag.
+   * Corresponds to ~/.mcp-conductor.json `metrics.alwaysShowTokenSavings`.
+   * Default: false.
+   */
+  alwaysShowTokenSavings?: boolean;
 }
 
 export interface ServersConfig {
