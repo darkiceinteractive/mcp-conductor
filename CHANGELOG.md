@@ -27,6 +27,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
   - B3: CBOR disk cache validates entries post-decode; malformed files discarded with warning.
   - B4: `sharedSecretPath` validated to resolve within `~/.mcp-conductor`.
   - B5: `import_servers_from_claude` summary scrubs env values and inline tokens.
+- **T1 — Performance benchmark suite** scaffolded at `test/perf/` (cold-start, warm-call, passthrough-call, tokenize-throughput implemented; cache-hit, bridge-throughput, registry-refresh stubbed). New scripts: `npm run test:perf` (CI gate) and `npm run test:perf:bench` (throughput report).
+- **T8 — Coverage thresholds** enforced via `vitest.config.ts` per-module table; new `npm run test:coverage:check` script. Thresholds calibrated to current actuals (80% overall, per-module floors) with ratchet plan documented in `docs/dev/coverage-targets.md`.
 
 ---
 
