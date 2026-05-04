@@ -7,6 +7,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Stress test suite (S — concurrency)** at `test/stress/` (5 files): execute-code concurrency sweep (10→1000), worker pool scaling sweep (1→32 workers), bridge RPS ceiling, burst recovery, observability overhead. Heavy variants behind `STRESS=1` env. Curves emitted to `docs/benchmarks/stress/*.json` per run. New scripts: `npm run test:stress` (PR gate), `npm run test:stress:full` (nightly). Nightly workflow extended with `stress-tests` job.
+
 ## [3.1.0-rc.1] - 2026-05-04
 
 The v3.1 release candidate — hardening, comprehensive tests, public docs site, token-savings reporter, and the first Medium article. 29 blocks shipped over 13 PRs across 3 multi-agent waves. Tag publishes to npm `@next`; promote to `@latest` after 7-day soak.
