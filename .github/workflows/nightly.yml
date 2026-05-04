@@ -111,3 +111,33 @@ jobs:
 
       - name: Run security suite
         run: npm run test:security
+
+  # ── S: Stress tests (concurrency + pool scaling + bridge ceiling) ────────────
+  stress-tests:
+    name: Stress tests (S1-S5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STRESS: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run stress suite (full)
+        run: npm run test:stress:full
+
+      - name: Upload stress benchmark artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-benchmarks-${{ github.run_number }}
+          path: docs/benchmarks/stress/
+          retention-days: 30
+

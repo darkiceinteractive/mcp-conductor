@@ -43,7 +43,9 @@
     "test:memory-leak": "vitest run test/memory-leak",
     "test:security": "vitest run test/security",
     "record:fixtures": "tsx scripts/record-fixtures.ts",
-    "benchmark:token-savings": "vitest run test/popular-mcps/token-savings"
+    "benchmark:token-savings": "vitest run test/popular-mcps/token-savings",
+    "test:stress": "vitest run --config vitest.stress.config.ts",
+    "test:stress:full": "STRESS=1 vitest run --config vitest.stress.config.ts"
   },
   "keywords": [
     "mcp",
