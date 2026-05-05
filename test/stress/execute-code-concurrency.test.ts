@@ -175,10 +175,13 @@ describe('S1 — execute_code concurrency sweep', () => {
         });
 
         // ── Assertions ──────────────────────────────────────────────────────
-        // S1 core assertion: success rate ≥ 95% at all concurrency levels.
-        // The queue-and-process pool must not amplify the 1% transient error rate
-        // into catastrophic failures at high concurrency.
-        expect(successRate).toBeGreaterThanOrEqual(0.95);
+        // S1 core assertion: success rate ≥ 90% at all concurrency levels.
+        // The queue-and-process pool must not amplify the 1% transient error
+        // rate into catastrophic failures. Floor is 0.90 (not 0.95) because at
+        // small N (e.g. 50), binomial variance on a 1% error rate produces 3+
+        // failures in ~1.4% of runs — flaking the test without pointing at a
+        // real regression. 0.90 still catches >5× error amplification.
+        expect(successRate).toBeGreaterThanOrEqual(0.9);
 
         // Every issued call must produce an outcome (no silent drops).
         expect(successCount + failureCount).toBe(concurrent);
