@@ -30,6 +30,11 @@ tmp/
 # npm
 *.tgz
 
+# Docs site (Docusaurus) — build outputs only; source is committed
+docs-site/node_modules
+docs-site/build
+docs-site/.docusaurus
+
 # Claude / OMC session files (private, not for public repo)
 .claude/
 .omc/
@@ -51,3 +56,6 @@ docs/images/
 # v3 generated types (auto-generated from registry; do not commit)
 src/registry/types/*.d.ts
 src/registry/types/*.json
+
+# Article pipeline generated outputs (rebuilt by CI on each push)
+articles/*/dist/

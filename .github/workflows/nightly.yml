@@ -1,0 +1,143 @@
+name: nightly
+
+on:
+  schedule:
+    # 02:00 UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  # ── T2: Memory soak ─────────────────────────────────────────────────────────
+  memory-soak:
+    name: Memory soak (T2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # T2 memory-leak suite reads NIGHTLY=1 to run full iteration counts
+      # (10 000 calls, 100 000 cache writes, etc.). Without it the suite runs
+      # at reduced iterations that fit within the PR gate budget.
+      NIGHTLY: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: npm ci
+
+      - name: Run memory-leak suite
+        run: npm run test:memory-leak
+
+  # ── T4 + T5: Real-API popular MCPs ──────────────────────────────────────────
+  real-api-popular-mcps:
+    name: Real-API popular MCPs (T4 + T5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Enables live.test.ts suites in test/popular-mcps/*/
+      LIVE_TESTS: '1'
+      # GitHub: needs read:user, repo (read-only) scopes
+      GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_LIVE_TESTS }}
+      # Google: base64-encoded OAuth JSON credential for a test account
+      GOOGLE_OAUTH_CREDS: ${{ secrets.GOOGLE_OAUTH_CREDS }}
+      # Brave Search API key (free tier is sufficient for nightly)
+      BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+      # Slack: bot token with channels:read, search:read scopes
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      # Notion: integration token with read access
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      # Linear: API key with read access
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: npm ci
+
+      - name: Run token-savings benchmark
+        run: npm run benchmark:token-savings
+
+      - name: Run popular-MCP live tests
+        run: npm test -- test/popular-mcps/github/live.test.ts test/popular-mcps/filesystem/live.test.ts test/popular-mcps/gmail/live.test.ts test/popular-mcps/gdrive/live.test.ts test/popular-mcps/gcalendar/live.test.ts test/popular-mcps/brave-search/live.test.ts test/popular-mcps/memory/live.test.ts test/popular-mcps/slack/live.test.ts test/popular-mcps/notion/live.test.ts test/popular-mcps/linear/live.test.ts
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-benchmarks-${{ github.run_number }}
+          path: docs/benchmarks/
+          retention-days: 30
+
+  # ── T3: Security fuzzing ─────────────────────────────────────────────────────
+  security-fuzz:
+    name: Security fuzzing (T3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # T3 security suite reads EXTENDED_FUZZ=1 to run full fuzzing iterations
+      # (10 000 payloads vs 500 in PR gate). Also enables timing-sensitive
+      # constant-time comparison tests that are too slow for the PR gate.
+      EXTENDED_FUZZ: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: npm ci
+
+      - name: Run security suite
+        run: npm run test:security
+
+  # ── S: Stress tests (concurrency + pool scaling + bridge ceiling) ────────────
+  stress-tests:
+    name: Stress tests (S1-S5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STRESS: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run stress suite (full)
+        run: npm run test:stress:full
+
+      - name: Upload stress benchmark artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-benchmarks-${{ github.run_number }}
+          path: docs/benchmarks/stress/
+          retention-days: 30
+

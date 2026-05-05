@@ -1,0 +1,19 @@
+{
+  "server": "filesystem",
+  "tool": "read_file",
+  "argsHash": "sha256:e5f6a7b8c9d00005",
+  "args": {
+    "path": "/tmp/test.txt"
+  },
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "This is a test file used by the MCP Conductor recording harness.\nLine 2 of the file.\nLine 3 of the file.\nLine 4: some structured data follows.\nkey: value\nanother_key: another_value\nEnd of file.\n"
+      }
+    ]
+  },
+  "responseBytes": 201,
+  "recordedAt": "2026-05-04T02:00:00.000Z",
+  "synthetic": true
+}

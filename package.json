@@ -1,6 +1,6 @@
 {
   "name": "@darkiceinteractive/mcp-conductor",
-  "version": "3.0.0-beta.2",
+  "version": "3.1.0-rc.1",
   "description": "MCP server that orchestrates code execution in a sandboxed Deno environment with access to all MCP servers",
   "type": "module",
   "main": "dist/index.js",
@@ -29,11 +29,23 @@
     "test:coverage": "vitest run --coverage",
     "test:all": "vitest run",
     "benchmark:scale": "tsx scripts/run-benchmarks.ts",
+    "build:articles": "tsx scripts/build-articles.ts",
+    "build:articles:watch": "tsx watch scripts/build-articles.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:perf": "vitest run test/perf",
+    "test:perf:bench": "vitest bench test/perf",
+    "test:coverage:check": "vitest run --coverage",
+    "test:popular-mcps": "vitest run test/popular-mcps",
+    "test:memory-leak": "vitest run test/memory-leak",
+    "test:security": "vitest run test/security",
+    "record:fixtures": "tsx scripts/record-fixtures.ts",
+    "benchmark:token-savings": "vitest run test/popular-mcps/token-savings",
+    "test:stress": "vitest run --config vitest.stress.config.ts",
+    "test:stress:full": "STRESS=1 vitest run --config vitest.stress.config.ts"
   },
   "keywords": [
     "mcp",
@@ -81,6 +93,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.14.0",
     "@types/node": "^22.10.2",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
@@ -88,8 +101,14 @@
     "@vitest/coverage-v8": "^2.1.8",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
+    "rehype-stringify": "^10.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "remark-stringify": "^11.0.0",
+    "sharp": "^0.33.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "unified": "^11.0.5",
     "vitest": "^2.1.8"
   }
 }

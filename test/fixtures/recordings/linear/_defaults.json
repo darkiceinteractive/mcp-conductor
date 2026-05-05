@@ -1,0 +1,5 @@
+{
+  "list_issues": { "first": 10 },
+  "get_issue": { "id": "ISSUE_ID_PLACEHOLDER" },
+  "list_projects": {}
+}

@@ -50,6 +50,7 @@ export const DEFAULT_CONFIG: MCPExecutorConfig = {
     enabled: true,
     logToFile: false,
     logPath: null,
+    alwaysShowTokenSavings: false,
   },
   servers: {
     allowList: ['*'],

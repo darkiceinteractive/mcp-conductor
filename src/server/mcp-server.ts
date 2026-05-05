@@ -16,7 +16,7 @@ import { applyBuiltInRecommendations } from '../registry/built-in-recommendation
 import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
-import { MetricsCollector } from '../metrics/index.js';
+import { MetricsCollector, computeTokenSavings, type TokenSavings } from '../metrics/index.js';
 import { shutdownStreamManager } from '../streaming/index.js';
 import { shutdownMetricsCollector } from '../metrics/index.js';
 import { shutdownModeHandler } from '../modes/index.js';
@@ -65,6 +65,15 @@ export class MCPExecutorServer {
 
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
+
+  /**
+   * B6: Tracks whether registerPassthroughTools() has completed in start().
+   * MUST be true before server.connect(transport) is called. Exposed
+   * internally so tests can assert the ordering invariant without spawning
+   * a real stdio transport.
+   * @internal
+   */
+  _passthroughRegistrationComplete = false;
 
   constructor(config: MCPExecutorConfig, options?: { useMockServers?: boolean }) {
     this.config = config;
@@ -167,9 +176,6 @@ export class MCPExecutorServer {
   }
 
   /**
-   * Register all MCP tools
-   */
-  /**
    * Record metrics + shape the execute_code tool response. Extracted so the
    * progress/cancel wiring in the handler stays readable.
    */
@@ -178,6 +184,7 @@ export class MCPExecutorServer {
     code: string,
     servers: string[] | undefined,
     verbose: boolean | undefined,
+    showTokenSavings: boolean | undefined,
   ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
     const executionMetrics = this.metricsCollector.recordExecution({
       executionId: result.executionId,
@@ -213,12 +220,36 @@ export class MCPExecutorServer {
       output.logs = result.logs;
     }
 
+    // Mode A: per-call token savings block.
+    // Shown when show_token_savings flag is set on the call, OR when
+    // metrics.alwaysShowTokenSavings is enabled in the conductor config.
+    const wantSavings =
+      showTokenSavings === true || this.config.metrics.alwaysShowTokenSavings === true;
+
+    if (wantSavings) {
+      const resultJson = result.result !== undefined ? JSON.stringify(result.result) : '';
+      const savings: TokenSavings = computeTokenSavings({
+        toolCalls: result.metrics.toolCalls,
+        dataProcessedBytes: result.metrics.dataProcessedBytes,
+        codeChars: code.length,
+        resultBytes: resultJson.length,
+      });
+      output.tokenSavings = savings;
+    }
+
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
     };
   }
 
+  /**
+   * Register all 24 static MCP tools on the SDK server instance.
+   * Called from the constructor — runs synchronously before `start()`.
+   * Passthrough tools (dynamic, registry-backed) are registered later in
+   * `start()` via `registerPassthroughTools()`, strictly before the SDK
+   * transport connects (B6 ordering invariant).
+   */
   private registerTools(): void {
     // Register execute_code tool
     this.server.registerTool(
@@ -248,6 +279,16 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           timeout_ms: z.number().optional().describe('Maximum execution time in milliseconds. Default: 30000.'),
           stream: z.boolean().optional().describe('If true, stream progress updates. Default: false.'),
           verbose: z.boolean().optional().describe('If true, include detailed metrics in response. Default: false.'),
+          show_token_savings: z.boolean().optional().describe(
+            'If true, attach a tokenSavings block to the response estimating how many tokens ' +
+            'execute_code saved versus calling the same tools in passthrough mode. ' +
+            'The estimate uses the formula: passthrough = (toolCalls × 150) + (dataBytes / 1024 × 256); ' +
+            'execution = ceil(codeChars / 3.5) + ceil(resultBytes / 3.8). ' +
+            'Note: 256 tokens/KB is an observed average — actual savings vary by content. ' +
+            'For passthrough-mode tools the block carries a "not applicable" note. ' +
+            'Can also be enabled globally via metrics.alwaysShowTokenSavings in ~/.mcp-conductor.json. ' +
+            'Default: false.',
+          ),
         },
         outputSchema: {
           success: z.boolean(),
@@ -266,9 +307,16 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             estimated_tokens_saved: z.number(),
           }).optional(),
           logs: z.array(z.string()).optional(),
+          tokenSavings: z.object({
+            estimatedPassthroughTokens: z.number(),
+            actualExecutionTokens: z.number(),
+            tokensSaved: z.number(),
+            savingsPercent: z.number(),
+            note: z.string().optional(),
+          }).optional(),
         },
       },
-      async ({ code, servers, timeout_ms, stream, verbose }, extra) => {
+      async ({ code, servers, timeout_ms, stream, verbose, show_token_savings }, extra) => {
         const timeoutMs = Math.min(
           timeout_ms || this.config.execution.defaultTimeoutMs,
           this.config.execution.maxTimeoutMs
@@ -321,7 +369,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             signal: extra?.signal,
             executionId,
           });
-          return this.finaliseExecuteCodeResult(result, code, servers, verbose);
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings);
         } finally {
           if (execStream) {
             // Flip the stream out of `running` so StreamManager's normal
@@ -554,6 +602,20 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             passthrough_calls: z.number(),
           }),
           current_mode: z.enum(['execution', 'passthrough', 'hybrid']),
+          tokenSavings: z.object({
+            sessionActual: z.number(),
+            sessionEstimatedDirect: z.number(),
+            sessionSavingsPercent: z.number(),
+            perTool: z.array(z.object({
+              server: z.string(),
+              tool: z.string(),
+              calls: z.number(),
+              actualTokens: z.number(),
+              estimatedPassthroughTokens: z.number(),
+              savingsPercent: z.number(),
+              note: z.string().optional(),
+            })),
+          }),
           details: z.object({
             top_servers: z.array(z.object({ server: z.string(), calls: z.number() })).optional(),
             top_tools: z.array(z.object({ tool: z.string(), calls: z.number() })).optional(),
@@ -599,6 +661,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             passthrough_calls: sessionMetrics.passthroughModeCount,
           },
           current_mode: this.currentMode,
+          tokenSavings: this.metricsCollector.getTokenSavings(),
         };
 
         // Include detailed breakdowns if requested
@@ -1954,6 +2017,16 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
         (server, name, meta) => this.registry.annotate(server, name, meta)
       );
       registerPassthroughTools(this.registry, this.server as unknown as import('./passthrough-registrar.js').McpServerLike, this.hub);
+      // B6: All passthrough tools are now registered. Set the flag so that
+      // tests (and future guards) can assert the ordering invariant:
+      // this._passthroughRegistrationComplete must be true before
+      // server.connect(transport) is called below.
+      this._passthroughRegistrationComplete = true;
+    } else {
+      // When useMockServers is active there are no passthrough tools to
+      // register, but we mark the flag so the transport-connect guard below
+      // does not need a separate branch.
+      this._passthroughRegistrationComplete = true;
     }
 
     // Set up bridge handlers
@@ -2126,6 +2199,16 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
 
     // Start bridge server
     await this.bridge.start();
+
+    // B6: Guard — passthrough registration MUST complete before the SDK
+    // transport connects. If this ever throws it indicates a code-path bug
+    // (e.g. an early-return inserted above that bypasses the flag assignment).
+    if (!this._passthroughRegistrationComplete) {
+      throw new Error(
+        'MCPExecutorServer: passthrough tool registration did not complete before transport connect. ' +
+        'This is a bug — do not call server.connect(transport) before registerPassthroughTools() returns.'
+      );
+    }
 
     // Connect to stdio transport
     const transport = new StdioServerTransport();

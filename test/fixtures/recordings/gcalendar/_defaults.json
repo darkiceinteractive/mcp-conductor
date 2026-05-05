@@ -1,0 +1,6 @@
+{
+  "list_calendars": {},
+  "list_events": { "calendarId": "primary", "maxResults": 10 },
+  "get_event": { "calendarId": "primary", "eventId": "EVENT_ID_PLACEHOLDER" },
+  "suggest_time": { "duration": 60, "attendees": [] }
+}

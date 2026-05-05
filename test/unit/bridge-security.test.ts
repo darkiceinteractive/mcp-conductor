@@ -88,4 +88,22 @@ describe('HttpBridge DNS-rebinding guard', () => {
     });
     expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
   });
+
+  // B8: ACAO must be hardcoded to the bound loopback port, not an echo of
+  // the caller's Origin. This prevents a future credentials: 'include' from
+  // enabling cross-origin cookie theft via a reflected Origin header.
+  it('B8: ACAO is hardcoded 127.0.0.1 loopback URL, not the echoed Origin', async () => {
+    // Send Origin as 'localhost' form — ACAO must come back as '127.0.0.1' form.
+    const response = await fetch(`http://${TEST_HOST}/health`, {
+      headers: { Origin: `http://localhost:${TEST_PORT}` },
+    });
+    const acao = response.headers.get('access-control-allow-origin');
+    expect(acao).toBe(`http://127.0.0.1:${TEST_PORT}`);
+  });
+
+  it('B8: ACAO is hardcoded loopback URL even when no Origin header is sent', async () => {
+    const response = await fetch(`http://${TEST_HOST}/health`);
+    const acao = response.headers.get('access-control-allow-origin');
+    expect(acao).toBe(`http://127.0.0.1:${TEST_PORT}`);
+  });
 });

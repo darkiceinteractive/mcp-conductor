@@ -1,0 +1,49 @@
+name: Docs Build
+
+on:
+  push:
+    branches:
+      - 'feature/v3.1'
+      - 'docs/v3.1-*'
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-build.yml'
+  pull_request:
+    branches:
+      - 'feature/v3.1'
+      - 'main'
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-build.yml'
+
+jobs:
+  build:
+    name: Build Docusaurus site
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Build
+        working-directory: docs-site
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: docs-build
+          path: docs-site/build
+          retention-days: 7

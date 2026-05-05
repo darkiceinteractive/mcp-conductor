@@ -15,11 +15,11 @@
  * @module daemon/server
  */
 
-import { createServer, type Server as NetServer, type Socket } from 'node:net';
+import { createServer, createConnection, type Server as NetServer, type Socket } from 'node:net';
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, unlinkSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -39,22 +39,32 @@ const DEFAULT_AUTH_PATH = join(homedir(), '.mcp-conductor', 'daemon-auth.json');
 const DEFAULT_SOCKET_PATH = join(homedir(), '.mcp-conductor', 'daemon.sock');
 const CONDUCTOR_DIR = join(homedir(), '.mcp-conductor');
 
-function loadOrCreateSecret(authPath: string): string {
-  if (existsSync(authPath)) {
+// B2: Maximum receive-buffer size per client connection (10 MB).
+// A client that streams data without ever sending a newline would grow the
+// buffer without bound, causing an OOM. Destroy the socket if exceeded.
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
+/** @internal Exported for testing only. Do not call directly in production code. */
+export function loadOrCreateSecret(authPath: string): string {
+  // MED-1: open the file directly instead of existsSync + readFileSync to
+  // eliminate the TOCTOU window. Treat ENOENT as "not found" and fall through
+  // to generation; re-throw anything else (permission denied, I/O error, etc.).
+  try {
     const raw = readFileSync(authPath, 'utf-8');
     return (JSON.parse(raw) as AuthFile).sharedSecret;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+    // File does not exist — fall through to generate a new secret.
   }
-  mkdirSync(CONDUCTOR_DIR, { recursive: true });
+  mkdirSync(dirname(authPath), { recursive: true });
   const secret = randomBytes(32).toString('hex');
   const content: AuthFile = { sharedSecret: secret };
   // Pass mode: 0o600 atomically so the file is never world-readable (CRIT-4).
   writeFileSync(authPath, JSON.stringify(content, null, 2), { mode: 0o600, encoding: 'utf-8' });
   logger.info('DaemonServer: generated new shared secret', { authPath });
   return secret;
-}
-
-function hmacToken(secret: string, nonce: string): string {
-  return createHmac('sha256', secret).update(nonce).digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +168,20 @@ export class DaemonServer {
     this.tcpPort = options.tcpPort;
 
     const authPath = options.auth?.sharedSecretPath ?? DEFAULT_AUTH_PATH;
+
+    // B4: Validate that sharedSecretPath resolves within CONDUCTOR_DIR.
+    // A caller-controlled path could otherwise cause chmodSync to narrow
+    // permissions on an arbitrary file outside the conductor directory.
+    if (options.auth?.sharedSecretPath !== undefined) {
+      const resolvedDir = resolve(dirname(authPath));
+      const conductorDir = resolve(CONDUCTOR_DIR);
+      if (!isAbsolute(authPath) || !resolvedDir.startsWith(conductorDir + '/') && resolvedDir !== conductorDir) {
+        throw new Error(
+          `DaemonServer: sharedSecretPath must resolve within CONDUCTOR_DIR (~/.mcp-conductor). Got: ${authPath}`,
+        );
+      }
+    }
+
     this.sharedSecret = options.auth?.sharedSecret ?? loadOrCreateSecret(authPath);
 
     this.kv = new SharedKV(options.kvOptions);
@@ -175,6 +199,18 @@ export class DaemonServer {
     mkdirSync(CONDUCTOR_DIR, { recursive: true });
 
     if (existsSync(this.socketPath)) {
+      // B9: Before unlinking the socket, probe whether a daemon is already
+      // listening. An unconditional unlink would silently evict a live daemon.
+      // We attempt a connect + ping with a 200ms timeout. If the socket
+      // responds (live daemon), we refuse to start. If it is stale (no
+      // response / connection refused), we unlink and proceed.
+      const isLive = await this._probeSocketLiveness(this.socketPath, 200);
+      if (isLive) {
+        this.running = false;
+        throw new Error(
+          `DaemonServer: another daemon is already listening on ${this.socketPath}; refusing to evict`
+        );
+      }
       unlinkSync(this.socketPath);
     }
 
@@ -187,6 +223,31 @@ export class DaemonServer {
     logger.info('DaemonServer: started', {
       socketPath: this.socketPath,
       tcpPort: this.tcpPort,
+    });
+  }
+
+  /**
+   * B9: Probe whether a Unix socket at `socketPath` has a live daemon behind
+   * it. Connects, waits up to `timeoutMs` for any data (the daemon sends a
+   * nonce challenge immediately on connect), and returns true if data arrives.
+   * Returns false on connection error, timeout, or if the socket is stale.
+   */
+  private _probeSocketLiveness(socketPath: string, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        resolve(result);
+      };
+
+      const timer = setTimeout(() => finish(false), timeoutMs);
+
+      const sock = createConnection({ path: socketPath });
+      sock.once('data', () => { clearTimeout(timer); finish(true); });
+      sock.once('error', () => { clearTimeout(timer); finish(false); });
+      sock.once('close', () => { clearTimeout(timer); finish(false); });
     });
   }
 
@@ -299,6 +360,17 @@ export class DaemonServer {
     socket.setEncoding('utf-8');
     socket.on('data', (chunk: string) => {
       buffer += chunk;
+      // B2: Destroy the socket if the receive buffer exceeds the cap.
+      // This prevents an authenticated client from causing OOM by streaming
+      // data without ever sending a newline delimiter.
+      if (buffer.length > MAX_BUFFER_BYTES) {
+        logger.warn('DaemonServer: client exceeded buffer cap, destroying socket', {
+          remote: socket.remoteAddress,
+          bufferLength: buffer.length,
+        });
+        socket.destroy();
+        return;
+      }
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
 
@@ -364,7 +436,10 @@ export class DaemonServer {
       return;
     }
 
-    const expected = hmacToken(this.sharedSecret, nonce);
+    // B11: hmacToken() was previously a module-level function. Inlined here to
+    // prevent future callers from accidentally reusing it with a caller-supplied
+    // nonce outside of the auth flow.
+    const expected = createHmac('sha256', this.sharedSecret).update(nonce).digest('hex');
     const expectedBuf = Buffer.from(expected, 'utf-8');
     const providedBuf = Buffer.from(token, 'utf-8');
 

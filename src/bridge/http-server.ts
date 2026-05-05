@@ -349,13 +349,19 @@ export class HttpBridge {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
     const method = req.method || 'GET';
 
-    // CORS: echo a localhost Origin back exactly, or set a benign default.
-    // Never answer `*` because that would pair with the loopback-only Host
-    // guard above to still leak bridge output to browser contexts on the
-    // same machine that we didn't verify.
+    // B8: Hardcode ACAO to the configured loopback port rather than echoing
+    // the validated Origin back. Echoing a caller-supplied value is safe while
+    // credentials: 'include' is absent, but would permit cross-origin cookie
+    // theft if credentials were ever added. A fixed loopback URL is strictly
+    // narrower and equally permissive for the only legitimate caller (the Deno
+    // sandbox, which always connects to 127.0.0.1:<port>).
+    // NOTE: Do NOT add credentials: 'include' to fetch calls in the sandbox
+    // without revisiting this header — a reflected Origin + credentials would
+    // open a cross-origin cookie theft vector.
+    const boundPort = this.actualPort || this.config.port;
     res.setHeader(
       'Access-Control-Allow-Origin',
-      originHeader ?? `http://${hostHeader ?? '127.0.0.1'}`,
+      `http://127.0.0.1:${boundPort}`,
     );
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');

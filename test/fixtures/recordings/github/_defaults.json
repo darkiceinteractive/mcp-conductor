@@ -1,0 +1,10 @@
+{
+  "get_me": {},
+  "list_repositories": { "owner": "octocat" },
+  "list_issues": { "owner": "octocat", "repo": "Hello-World" },
+  "get_issue": { "owner": "octocat", "repo": "Hello-World", "issue_number": 1 },
+  "list_pull_requests": { "owner": "octocat", "repo": "Hello-World" },
+  "get_pull_request": { "owner": "octocat", "repo": "Hello-World", "pull_number": 1 },
+  "search_code": { "q": "language:typescript mcp" },
+  "search_issues": { "q": "is:issue is:open label:bug" }
+}
