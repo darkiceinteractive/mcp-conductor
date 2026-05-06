@@ -3,10 +3,11 @@
  * @module cli/commands/import-servers
  */
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { safeJsonParse } from '../../utils/index.js';
+import { writeBackup } from '../../utils/backup.js';
 import {
   getClaudeConfigPaths,
   getDefaultConductorConfigPath,
@@ -66,31 +67,9 @@ export function findClaudeConfigsWithServers(configPaths?: string[]): Array<{ pa
   return found;
 }
 
-/**
- * Write a timestamped backup file alongside the original.
- *
- * B10: Uses a `.bak.YYYYMMDDHHMMSS` suffix so repeat runs produce distinct
- * files rather than silently overwriting the previous backup. If a file with
- * the same timestamp already exists (sub-second collision), a random 4-char
- * hex suffix is appended to guarantee uniqueness.
- *
- * @returns The path of the backup file that was written.
- */
-export function writeBackup(filePath: string): string {
-  // Generate YYYYMMDDHHMMSS from current UTC time.
-  // toISOString() → "2026-05-04T11:23:45.678Z"; strip non-digits, take first 14.
-  const ts = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-  let backupPath = `${filePath}.bak.${ts}`;
-
-  // Sub-second collision guard: append 4 random hex chars.
-  if (existsSync(backupPath)) {
-    const salt = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
-    backupPath = `${backupPath}.${salt}`;
-  }
-
-  copyFileSync(filePath, backupPath);
-  return backupPath;
-}
+// writeBackup is imported from ../../utils/backup.js and re-exported for
+// backwards-compat with any callers that import it from this module.
+export { writeBackup } from '../../utils/backup.js';
 
 /**
  * Strip named servers from a Claude config file.

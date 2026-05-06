@@ -147,8 +147,8 @@ export function getMCPClientConfigPaths(
   // -------------------------------------------------------------------------
   // OpenAI Codex CLI
   // -------------------------------------------------------------------------
-  // ~/.codex/config.json  (all platforms)
-  results.push(loc('codex', 'Codex CLI', join(home, '.codex', 'config.json'), 'json', 'mcpServers'));
+  // ~/.codex/config.toml  (all platforms — Codex uses TOML, not JSON)
+  results.push(loc('codex', 'Codex CLI', join(home, '.codex', 'config.toml'), 'toml', '[mcp_servers.*]'));
 
   // -------------------------------------------------------------------------
   // Gemini CLI
@@ -243,6 +243,9 @@ export function getMCPClientConfigPaths(
 
     // OpenCode project-local
     results.push(loc('opencode', 'OpenCode', join(cwd, 'opencode.json'), 'json', 'mcpServers', 'project'));
+
+    // Codex project-local
+    results.push(loc('codex', 'Codex CLI', join(cwd, '.codex', 'config.toml'), 'toml', '[mcp_servers.*]', 'project'));
   }
 
   return results;

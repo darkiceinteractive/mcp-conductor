@@ -37,8 +37,14 @@ export type {
 /**
  * Singleton adapter registry.
  *
- * Wave 2 adapter modules call `ADAPTERS.set(clientId, adapter)` at module
- * load time.  The wizard, doctor, and import commands look up adapters here
- * rather than importing client-specific code directly.
+ * Adapter modules call `ADAPTERS.set(clientId, adapter)` at module load time.
+ * The wizard, doctor, and import commands look up adapters here rather than
+ * importing client-specific code directly.
  */
 export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();
+
+// ---------------------------------------------------------------------------
+// Concrete adapter registrations (side-effect imports).
+// Each module calls ADAPTERS.set() at load time.
+// ---------------------------------------------------------------------------
+import './codex.js';

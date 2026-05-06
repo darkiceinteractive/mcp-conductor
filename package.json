@@ -75,6 +75,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.20.0",
