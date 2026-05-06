@@ -127,7 +127,7 @@ describe('importServers', () => {
 describe('formatImportResults', () => {
   it('returns no-config message when results empty', () => {
     const text = formatImportResults([]);
-    expect(text).toContain('No Claude config');
+    expect(text).toContain('No MCP client config');
   });
 
   it('shows imported server names', () => {
