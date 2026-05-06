@@ -42,3 +42,10 @@ export type {
  * rather than importing client-specific code directly.
  */
 export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();
+
+// ---------------------------------------------------------------------------
+// Adapter registrations (Wave 2)
+// ---------------------------------------------------------------------------
+
+import { CONTINUE_ADAPTER } from './continue.js';
+ADAPTERS.set('continue', CONTINUE_ADAPTER);
