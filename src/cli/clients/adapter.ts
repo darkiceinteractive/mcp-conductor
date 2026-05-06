@@ -109,3 +109,16 @@ export interface MCPClientAdapter {
    */
   serialize(path: string, config: NormalisedClientConfig, options: SerializeOptions): void;
 }
+
+/**
+ * Singleton adapter registry.
+ *
+ * Lives here (not in `index.ts`) because adapter modules import from `./index.js`
+ * to call `ADAPTERS.set()` at module load — putting the Map in `index.ts` would
+ * create a temporal-dead-zone error since ESM hoists `import` statements above
+ * the `const ADAPTERS = new Map()` declaration.
+ *
+ * The wizard, doctor, and import commands look up adapters here rather than
+ * importing client-specific code directly.
+ */
+export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();

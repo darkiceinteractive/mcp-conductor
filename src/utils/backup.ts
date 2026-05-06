@@ -38,3 +38,7 @@ export function writeBackup(filePath: string): string {
   copyFileSync(filePath, backupPath);
   return backupPath;
 }
+
+// Aliases — multiple Wave 2 adapters chose different names independently.
+export const createBackup = writeBackup;
+export const backupFile = writeBackup;

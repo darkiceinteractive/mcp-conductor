@@ -147,8 +147,8 @@ export function getMCPClientConfigPaths(
   // -------------------------------------------------------------------------
   // OpenAI Codex CLI
   // -------------------------------------------------------------------------
-  // ~/.codex/config.json  (all platforms)
-  results.push(loc('codex', 'Codex CLI', join(home, '.codex', 'config.json'), 'json', 'mcpServers'));
+  // ~/.codex/config.toml  (all platforms — Codex uses TOML, not JSON)
+  results.push(loc('codex', 'Codex CLI', join(home, '.codex', 'config.toml'), 'toml', '[mcp_servers.*]'));
 
   // -------------------------------------------------------------------------
   // Gemini CLI
@@ -201,14 +201,14 @@ export function getMCPClientConfigPaths(
   // -------------------------------------------------------------------------
   // Continue.dev (VS Code / JetBrains extension)
   // -------------------------------------------------------------------------
-  results.push(loc('continue', 'Continue.dev', join(home, '.continue', 'config.json'), 'json', 'mcpServers'));
+  results.push(loc('continue', 'Continue.dev', join(home, '.continue', 'config.yaml'), 'yaml', 'mcpServers'));
 
   // -------------------------------------------------------------------------
-  // OpenCode
+  // OpenCode (uses 'mcp' key not 'mcpServers'; file is opencode.json)
   // -------------------------------------------------------------------------
-  results.push(loc('opencode', 'OpenCode', join(home, '.config', 'opencode', 'config.json'), 'json', 'mcpServers'));
+  results.push(loc('opencode', 'OpenCode', join(home, '.config', 'opencode', 'opencode.json'), 'json', 'mcp'));
   if (isWin && appData) {
-    results.push(loc('opencode', 'OpenCode', join(appData, 'opencode', 'config.json'), 'json', 'mcpServers'));
+    results.push(loc('opencode', 'OpenCode', join(appData, 'opencode', 'opencode.json'), 'json', 'mcp'));
   }
 
   // -------------------------------------------------------------------------
@@ -242,7 +242,10 @@ export function getMCPClientConfigPaths(
     results.push(loc('continue', 'Continue.dev', join(cwd, '.continue', 'config.json'), 'json', 'mcpServers', 'project'));
 
     // OpenCode project-local
-    results.push(loc('opencode', 'OpenCode', join(cwd, 'opencode.json'), 'json', 'mcpServers', 'project'));
+    results.push(loc('opencode', 'OpenCode', join(cwd, 'opencode.json'), 'json', 'mcp', 'project'));
+
+    // Codex project-local
+    results.push(loc('codex', 'Codex CLI', join(cwd, '.codex', 'config.toml'), 'toml', '[mcp_servers.*]', 'project'));
   }
 
   return results;
