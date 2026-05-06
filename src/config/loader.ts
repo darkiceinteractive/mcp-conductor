@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import type { MCPExecutorConfig, ExecutionMode, ClaudeConfig, ConductorConfig } from './schema.js';
 import { DEFAULT_CONFIG, DEFAULT_CONDUCTOR_CONFIG, ENV_VARS } from './defaults.js';
 import { logger, safeJsonParse } from '../utils/index.js';
+import { getMCPClientConfigPaths } from '../cli/clients/registry.js';
 
 /**
  * Load configuration from environment variables
@@ -145,34 +146,21 @@ export function loadConfig(configPath?: string): MCPExecutorConfig {
 }
 
 /**
- * Claude config file search paths (cross-platform)
+ * Claude config file search paths (cross-platform).
+ *
+ * @deprecated Use `getMCPClientConfigPaths()` from `src/cli/clients/registry.ts`
+ *   for multi-client discovery.  This function is kept as a backwards-compat
+ *   shim so existing callers (`import-servers`, `wizard/setup`, tests) continue
+ *   to work without modification.
+ *
+ * Delegates to `getMCPClientConfigPaths({ includeProject: true })` and filters
+ * to Claude-only clients, preserving the original return type (`string[]`) and
+ * including project-local paths for full parity with the old implementation.
  */
 export function getClaudeConfigPaths(): string[] {
-  const home = homedir();
-  const paths = [
-    // Claude Code settings (primary for Claude Code CLI)
-    join(home, '.claude', 'settings.json'),
-    // Claude Code configs
-    join(home, '.claude.json'),
-    join(home, 'Library', 'Application Support', 'Claude Code', 'claude_code_config.json'),
-    join(home, 'Library', 'Application Support', 'Claude', 'claude_code_config.json'),
-    // Claude Desktop configs
-    join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
-    join(home, '.config', 'claude', 'claude_desktop_config.json'),
-    // Linux XDG paths
-    join(home, '.config', 'Claude Code', 'claude_code_config.json'),
-    // Project local configs
-    join(process.cwd(), 'claude_code_config.json'),
-    join(process.cwd(), 'claude_desktop_config.json'),
-  ];
-
-  // Windows paths
-  const appData = process.env['APPDATA'];
-  if (process.platform === 'win32' && appData) {
-    paths.push(join(appData, 'Claude', 'claude_desktop_config.json'));
-  }
-
-  return paths;
+  return getMCPClientConfigPaths({ includeProject: true })
+    .filter((loc) => loc.client.startsWith('claude-'))
+    .map((loc) => loc.path);
 }
 
 /**
