@@ -18,6 +18,7 @@
 
 import type { MCPClientId } from './registry.js';
 import type { MCPClientAdapter } from './adapter.js';
+import { OPENCODE_ADAPTER } from './opencode.js';
 
 // Re-export everything Wave 2 agents need from a single import.
 export type { MCPClientId } from './registry.js';
@@ -42,3 +43,9 @@ export type {
  * rather than importing client-specific code directly.
  */
 export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();
+
+// ---------------------------------------------------------------------------
+// Adapter registrations
+// ---------------------------------------------------------------------------
+
+ADAPTERS.set('opencode', OPENCODE_ADAPTER);

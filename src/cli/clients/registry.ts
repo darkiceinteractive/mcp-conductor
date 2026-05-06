@@ -206,9 +206,9 @@ export function getMCPClientConfigPaths(
   // -------------------------------------------------------------------------
   // OpenCode
   // -------------------------------------------------------------------------
-  results.push(loc('opencode', 'OpenCode', join(home, '.config', 'opencode', 'config.json'), 'json', 'mcpServers'));
+  results.push(loc('opencode', 'OpenCode', join(home, '.config', 'opencode', 'opencode.json'), 'json', 'mcp'));
   if (isWin && appData) {
-    results.push(loc('opencode', 'OpenCode', join(appData, 'opencode', 'config.json'), 'json', 'mcpServers'));
+    results.push(loc('opencode', 'OpenCode', join(appData, 'opencode', 'opencode.json'), 'json', 'mcp'));
   }
 
   // -------------------------------------------------------------------------
@@ -242,7 +242,7 @@ export function getMCPClientConfigPaths(
     results.push(loc('continue', 'Continue.dev', join(cwd, '.continue', 'config.json'), 'json', 'mcpServers', 'project'));
 
     // OpenCode project-local
-    results.push(loc('opencode', 'OpenCode', join(cwd, 'opencode.json'), 'json', 'mcpServers', 'project'));
+    results.push(loc('opencode', 'OpenCode', join(cwd, 'opencode.json'), 'json', 'mcp', 'project'));
   }
 
   return results;
