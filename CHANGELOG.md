@@ -7,7 +7,74 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-05-06
+
+The multi-client patch. Setup wizard, export, and doctor now speak 10 MCP client dialects: Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor, Cline (VS Code), Zed, Continue.dev, OpenCode, Kimi Code. Pure additive — Claude-only behaviour unchanged via `--legacy` flag.
+
 ### Added
+
+- **MC1 + MC2 — Multi-client config discovery + adapter interface** (`src/cli/clients/`)
+  - `getMCPClientConfigPaths({ includeProject? })` returns typed `MCPClientConfigLocation[]` for all 10 clients across macOS/Linux/Windows.
+  - `MCPClientAdapter` interface with `parse(path)` → `NormalisedClientConfig` and `serialize(path, config, options)` for round-trip writes preserving non-MCP keys.
+  - 10 concrete adapters under `src/cli/clients/{client}.ts`. Notable divergences handled:
+    - Codex: TOML, `[mcp_servers.*]`, `env_vars` (not `env`); `source: remote` entries skipped.
+    - OpenCode: key is `mcp` (not `mcpServers`); `type: local|remote` field required.
+    - Zed: key is `context_servers`; `source: "custom"` injected/required.
+    - Continue: YAML; comment preservation not supported.
+    - Kimi Code: HTTP transport entries skipped with warning.
+  - Singleton `ADAPTERS` map populated automatically on `import './cli/clients/index.js'`.
+- **MC3 — Multi-client setup wizard** (`mcp-conductor-cli setup`)
+  - Discovers all known MCP clients on the machine, presents per-client diff, asks for confirmation per client. Auto-confirms in non-TTY/CI.
+  - On confirm: merges all servers into `~/.mcp-conductor.json` (de-duped by name) + installs single `mcp-conductor` entry into the client config.
+  - Each client independent — skipping one doesn't affect others.
+  - `.bak.YYYYMMDDHHMMSS` backup written before any overwrite.
+  - Legacy single-Claude flow preserved behind `--legacy` flag.
+- **MC4 — Per-client export** (`mcp-conductor-cli export --client <id>`)
+  - Writes a config file in the target client's native format (`.toml`/`.yaml`/`.json`) to `<cwd>/<client>-config.<ext>`.
+  - Default `export` (no flag) prints legacy JSON to stdout — backwards compatible.
+- **MC5 — Doctor MCP client coverage** (`mcp-conductor-cli doctor`)
+  - New "MCP CLIENT COVERAGE" section reports `[OK]`/`[MISSING]` per client.
+  - Recommends `mcp-conductor-cli setup` for any uncovered client.
+- **MC7 — Multi-client wizard integration tests** at `test/integration/multi-client-wizard.test.ts` (10 scenarios): mixed-format discovery, per-client skip, idempotency, backup creation, server de-dup, Codex TOML round-trip with extra `[settings]` keys, Zed `source: extension` skipping, OpenCode `type: remote` warning, empty config graceful exit, doctor coverage end-to-end.
+- **MC8 — Docs site multi-client setup page** at `docs-site/docs/v3/clients.md` (~320 lines): supported-clients reference table with config paths, format, MCP key, restart procedure for each of the 10 clients; setup wizard walkthrough; per-client export examples (Codex TOML, Continue YAML, Cursor JSON); doctor status explanation; troubleshooting per client.
+- **MC9 — README v3.1.1 refresh**: multi-client headline ("canonical MCP hub for any agent platform"); supported-clients quickstart table with paths for macOS/Linux/Windows; `npx -y @darkiceinteractive/mcp-conductor-cli@next setup` one-liner; what-the-wizard-does bullet; doctor coverage sample; per-client export examples.
+
+### Changed
+
+- **MC6 — Brand surface scrub**: 7 user-facing strings updated from "Claude config" → "MCP client config" across `src/bin/cli.ts`, `src/cli/commands/import-servers.ts`, `src/cli/wizard/setup.ts`. Trademarks preserved (Claude Code, Claude Desktop, Anthropic).
+- `src/utils/backup.ts`: extracted `writeBackup()` into shared module with `createBackup`/`backupFile` aliases for adapters that named the function differently.
+- `src/cli/clients/registry.ts`: corrected pre-existing path bugs — Codex `.json` → `.toml` with `[mcp_servers.*]`, OpenCode `mcpServers` → `mcp` with `opencode.json` filename, Continue format `json` → `yaml`.
+
+### Fixed
+
+- ESM TDZ: `ADAPTERS` map moved from `src/cli/clients/index.ts` to `src/cli/clients/adapter.ts` so adapter side-effect imports don't run before `const ADAPTERS = new Map()` is initialised.
+- Continue adapter: `serialize()` now `existsSync`-guards backup so it doesn't crash when the target config file doesn't yet exist (matches other adapters).
+
+### Dependencies
+
+- Added `yaml@^2.6.1` (~30KB, ISC) — required by Continue.dev YAML adapter.
+- Added `@iarna/toml@^2.2.5` (~50KB, MIT) — required by Codex TOML adapter.
+
+## [3.1.0] - 2026-05-05
+
+Promoted `3.1.0-rc.2` from `@next` to `@latest`. See `[3.1.0-rc.1]` for full details.
+
+## [3.1.0-rc.2] - 2026-05-05
+
+CI gate calibration over rc.1 — 4 thresholds adjusted for shared GitHub runner variance:
+
+### Fixed
+
+- tokenize-throughput p50 100→150ms / p99 200→300ms (CI runners ~115ms; local M-series ~30ms).
+- S1 stress success-rate gate 0.95→0.90 (binomial variance on 1% error rate at N=50 produces 3+ failures in ~1.4% of runs).
+- `src/cli/**` coverage threshold 38→33% (drift from T8 calibration as stress tests exposed more code paths).
+- daemon-auth-timing CV gate moved behind `NIGHTLY=1` (PR-runner socket jitter pushes CV to 0.45-0.55 in ~30% of runs; nightly runs on dedicated runners).
+
+### Added
+
+- `docs/dev/nightly-walkthrough.md`: step-by-step setup for the real-MCP nightly benchmark — 6 free-tier API keys, account setup, OAuth flow, smoke test, JSON artifact shape, code-execution vs passthrough comparison.
+
+### Stress test suites (carried forward from `[Unreleased]` in rc.1)
 
 - **Stress test suite (S — concurrency)** at `test/stress/` (5 files): execute-code concurrency sweep (10→1000), worker pool scaling sweep (1→32 workers), bridge RPS ceiling, burst recovery, observability overhead. Heavy variants behind `STRESS=1` env. Curves emitted to `docs/benchmarks/stress/*.json` per run. New scripts: `npm run test:stress` (PR gate), `npm run test:stress:full` (nightly). Nightly workflow extended with `stress-tests` job.
 - **Stress test suite (P — payloads + tokenization + cache)** at `test/stress/` (5 files): large-payload handling (100KB→50MB), tokenize scaling sweep (1KB→10MB × density), deep/wide JSON shapes (100/500/1000 deep × 10K/100K/1M wide), cache storm (write churn, read amplification, mixed ratios, key-collision attempts), findTool vector index scaling (100→100K tools). Heavy variants behind `STRESS=1`. Curves emitted to `docs/benchmarks/stress/*.json` per run.

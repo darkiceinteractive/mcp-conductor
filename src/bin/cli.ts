@@ -10,8 +10,8 @@
  *   test     — transient connect + list tools
  *   routing  — show/apply routing recommendations
  *   doctor   — health check all servers
- *   import   — non-interactive import from Claude configs
- *   export   — generate mcpServers JSON for Claude rollback
+ *   import   — non-interactive import from MCP client configs
+ *   export   — generate mcpServers JSON for client rollback
  *   daemon   — start|stop|status|logs (wired to Phase 6 module)
  *
  * @module bin/cli
@@ -21,7 +21,8 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { runSetupWizard } from '../cli/wizard/setup.js';
 import { importServers, formatImportResults } from '../cli/commands/import-servers.js';
-import { exportToClaude } from '../cli/commands/export-servers.js';
+import { exportToClaude, exportForClient, listExportableClients } from '../cli/commands/export-servers.js';
+import type { MCPClientId } from '../cli/commands/export-servers.js';
 import { testServer } from '../cli/commands/test-server.js';
 import { getRoutingRecommendations } from '../cli/commands/routing.js';
 import { runDoctor, formatDoctorResults } from '../cli/commands/doctor.js';
@@ -45,10 +46,11 @@ program
 // ----------------------------------------------------------------
 program
   .command('setup')
-  .description('Interactive wizard: detect Claude configs, import servers, verify health')
-  .action(async () => {
+  .description('Interactive wizard: detect all MCP client configs, migrate servers, verify health')
+  .option('--legacy', 'Use the legacy single-Claude wizard instead of the multi-client wizard')
+  .action(async (opts: { legacy?: boolean }) => {
     try {
-      await runSetupWizard();
+      await runSetupWizard({ legacy: opts.legacy });
     } catch (err) {
       console.error(pc.red(`Setup failed: ${String(err)}`));
       process.exit(1);
@@ -219,7 +221,7 @@ program
 // ----------------------------------------------------------------
 program
   .command('import')
-  .description('Import MCP servers from Claude config files (non-interactive)')
+  .description('Import MCP servers from MCP client config files (non-interactive)')
   .option('--remove-originals', 'Remove imported servers from source configs')
   .option('--dry-run', 'Show what would be imported without writing')
   .action((opts: { removeOriginals?: boolean; dryRun?: boolean }) => {
@@ -237,18 +239,41 @@ program
   });
 
 // ----------------------------------------------------------------
-// export — generate rollback JSON
+// export — generate rollback JSON or per-client config file
 // ----------------------------------------------------------------
 program
   .command('export')
-  .description('Generate mcpServers JSON that points Claude back at mcp-conductor (rollback path)')
-  .option('--format <format>', 'Output format: claude-desktop | claude-code | raw', 'claude-desktop')
-  .action((opts: { format?: string }) => {
+  .description(
+    'Export conductor config for a specific MCP client, or print legacy rollback JSON.\n' +
+    '  --client <id>  Write <id>-config.<ext> in the current directory.\n' +
+    '                 Valid IDs: ' + ['claude-desktop', 'claude-code', 'codex', 'gemini-cli',
+      'cursor', 'cline', 'zed', 'continue', 'opencode', 'kimi-code'].join(', '),
+  )
+  .option('--client <id>', 'Client ID to export for (writes a config file to cwd)')
+  .option('--format <format>', 'Legacy text format: claude-desktop | claude-code | raw (ignored when --client is set)', 'claude-desktop')
+  .option('--output <path>', 'Override the output file path (only with --client)')
+  .action((opts: { client?: string; format?: string; output?: string }) => {
     try {
-      const result = exportToClaude({
-        format: (opts.format as 'claude-desktop' | 'claude-code' | 'raw') ?? 'claude-desktop',
-      });
-      console.log(result.json);
+      if (opts.client) {
+        // MC4: per-client file export
+        const validClients = listExportableClients();
+        if (!validClients.includes(opts.client as MCPClientId)) {
+          console.error(pc.red(`Unknown client "${opts.client}". Valid clients: ${validClients.join(', ')}`));
+          process.exit(1);
+        }
+        const result = exportForClient({
+          clientId: opts.client as MCPClientId,
+          outputPath: opts.output,
+        });
+        console.log(pc.green(`Exported conductor config for ${result.clientId} → ${result.outputPath}`));
+        console.log(pc.dim(`Drop this file into the appropriate location for your client.`));
+      } else {
+        // Legacy: print JSON to stdout
+        const result = exportToClaude({
+          format: (opts.format as 'claude-desktop' | 'claude-code' | 'raw') ?? 'claude-desktop',
+        });
+        console.log(result.json);
+      }
     } catch (err) {
       console.error(pc.red(`Export failed: ${String(err)}`));
       process.exit(1);

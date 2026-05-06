@@ -1,5 +1,5 @@
 /**
- * import-servers command: read Claude config files, show diff, copy to ~/.mcp-conductor.json
+ * import-servers command: read MCP client config files, show diff, copy to ~/.mcp-conductor.json
  * @module cli/commands/import-servers
  */
 
@@ -180,7 +180,7 @@ function redactInlineTokens(str: string): string {
  */
 export function formatImportResults(results: ImportResult[], dryRun = false): string {
   if (results.length === 0) {
-    return 'No Claude config files with MCP servers found.';
+    return 'No MCP client config files with MCP servers found.';
   }
 
   const lines: string[] = [];
