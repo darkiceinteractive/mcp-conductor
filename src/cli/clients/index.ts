@@ -42,3 +42,9 @@ export type {
  * rather than importing client-specific code directly.
  */
 export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();
+
+// ---------------------------------------------------------------------------
+// Adapter registrations (imported for side-effects — each module calls
+// ADAPTERS.set() at load time).
+// ---------------------------------------------------------------------------
+import './cursor.js';
