@@ -24,6 +24,7 @@ const sidebars: SidebarsConfig = {
         'v3/sandbox-api',
         'v3/recipes',
         'v3/migration',
+        'v3/clients',
       ],
     },
   ],
