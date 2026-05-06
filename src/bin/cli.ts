@@ -10,8 +10,8 @@
  *   test     — transient connect + list tools
  *   routing  — show/apply routing recommendations
  *   doctor   — health check all servers
- *   import   — non-interactive import from Claude configs
- *   export   — generate mcpServers JSON for Claude rollback
+ *   import   — non-interactive import from MCP client configs
+ *   export   — generate mcpServers JSON for client rollback
  *   daemon   — start|stop|status|logs (wired to Phase 6 module)
  *
  * @module bin/cli
@@ -221,7 +221,7 @@ program
 // ----------------------------------------------------------------
 program
   .command('import')
-  .description('Import MCP servers from Claude config files (non-interactive)')
+  .description('Import MCP servers from MCP client config files (non-interactive)')
   .option('--remove-originals', 'Remove imported servers from source configs')
   .option('--dry-run', 'Show what would be imported without writing')
   .action((opts: { removeOriginals?: boolean; dryRun?: boolean }) => {
