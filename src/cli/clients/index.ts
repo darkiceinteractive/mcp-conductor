@@ -42,3 +42,9 @@ export type {
  * rather than importing client-specific code directly.
  */
 export const ADAPTERS = new Map<MCPClientId, MCPClientAdapter>();
+
+// ---------------------------------------------------------------------------
+// Adapter registrations (side-effect imports)
+// Each module calls ADAPTERS.set() at load time.
+// ---------------------------------------------------------------------------
+import './claude-code.js';
