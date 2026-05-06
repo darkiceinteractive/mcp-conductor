@@ -244,7 +244,7 @@ export async function runLegacySetupWizard(): Promise<void> {
   const sources = findClaudeConfigsWithServers();
 
   if (sources.length === 0) {
-    console.log(pc.yellow('No Claude config files with MCP servers found.'));
+    console.log(pc.yellow('No MCP client config files with MCP servers found.'));
     console.log('Add servers manually with: mcp-conductor-cli add <name> <command> [args...]');
     return;
   }
@@ -297,7 +297,7 @@ export async function runLegacySetupWizard(): Promise<void> {
   // Step 4: next steps
   console.log(pc.bold(pc.green('\nSetup complete!\n')));
   console.log('Next steps:');
-  console.log('  1. Restart Claude to pick up the new mcp-conductor config.');
+  console.log('  1. Restart your MCP client(s) to pick up the new mcp-conductor config.');
   console.log('  2. Use  mcp-conductor-cli list  to verify all servers are visible.');
   console.log('  3. Use  mcp-conductor-cli doctor  to check for any issues.\n');
 }
@@ -308,7 +308,7 @@ export async function runLegacySetupWizard(): Promise<void> {
 
 export interface SetupWizardOptions {
   /**
-   * When `true`, run the legacy single-Claude wizard instead of the new
+   * When `true`, run the legacy single-client wizard instead of the new
    * multi-client wizard.  Activated via `mcp-conductor-cli setup --legacy`.
    */
   legacy?: boolean;
