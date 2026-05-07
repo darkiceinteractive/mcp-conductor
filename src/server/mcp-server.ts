@@ -84,13 +84,41 @@ export class MCPExecutorServer {
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
 
   /**
-   * B6: Tracks whether registerPassthroughTools() has completed in start().
-   * MUST be true before server.connect(transport) is called. Exposed
-   * internally so tests can assert the ordering invariant without spawning
-   * a real stdio transport.
+   * Tracks whether registerPassthroughTools() has completed in start().
+   * The transport connects before this becomes true; hub-dependent tools
+   * guard against invocation while this is still false.
    * @internal
    */
   _passthroughRegistrationComplete = false;
+
+  /**
+   * Promise that resolves when hub initialisation + passthrough registration
+   * complete. Settled (resolved or rejected) by _runHubInit().
+   * @internal
+   */
+  private _hubInitPromise: Promise<void> | null = null;
+
+  /**
+   * Returns true once the hub has initialised and all passthrough tools are
+   * registered. Static meta-tools (execute_code, set_mode, etc.) are always
+   * ready — only hub-backed tools (list_servers, discover_tools,
+   * passthrough_call, and the auto-registered <server>__<tool> tools) are
+   * gated behind this.
+   */
+  isReady(): boolean {
+    return this._passthroughRegistrationComplete;
+  }
+
+  /**
+   * Waits until hub initialisation and passthrough registration have
+   * completed. Useful in tests and callers that need the full tool set.
+   */
+  awaitReady(): Promise<void> {
+    if (this._hubInitPromise) return this._hubInitPromise;
+    if (this._passthroughRegistrationComplete) return Promise.resolve();
+    // start() hasn't been called yet — caller is early.
+    return Promise.reject(new Error('start() has not been called'));
+  }
 
   constructor(config: MCPExecutorConfig, options?: { useMockServers?: boolean }) {
     this.config = config;
@@ -667,6 +695,13 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           tools?: string[];
         }>;
 
+        if (!this.useMockServers && !this._passthroughRegistrationComplete) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: 'Hub initialisation in progress, retry shortly.' }) }],
+            structuredContent: { servers: [], total_servers: 0, total_tools: 0 },
+          };
+        }
+
         if (this.useMockServers) {
           // Use mock servers for testing
           servers = Array.from(this.mockServers.entries()).map(([name, data]) => ({
@@ -728,6 +763,13 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
         },
       },
       async ({ query, server, limit }) => {
+        if (!this.useMockServers && !this._passthroughRegistrationComplete) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: 'Hub initialisation in progress, retry shortly.' }) }],
+            structuredContent: { results: [], total_matches: 0, servers_searched: 0 },
+          };
+        }
+
         const maxResults = limit || 20;
         const results: Array<{ server: string; tool: string; description: string; relevance: number }> = [];
         const searchLower = (query || '').toLowerCase();
@@ -1257,6 +1299,13 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
         },
       },
       async ({ server, tool, params }) => {
+        if (!this.useMockServers && !this._passthroughRegistrationComplete) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: 'Hub initialisation in progress, retry shortly.' }) }],
+            structuredContent: { success: false, error: 'Hub initialisation in progress, retry shortly.', metrics: { duration_ms: 0, mode: 'passthrough' as const } },
+          };
+        }
+
         const startTime = Date.now();
         const passthroughId = `passthrough_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -2305,67 +2354,70 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
   /**
    * Start the server
    */
-  async start(): Promise<void> {
-    // Initialise the MCP Hub (connect to real servers)
-    if (!this.useMockServers) {
-      logger.info('Initialising MCP Hub...');
-      await this.hub.initialise();
-      const stats = this.hub.getStats();
-      logger.info('MCP Hub initialised', {
-        connected: stats.connected,
-        total: stats.total,
-      });
+  /**
+   * Run hub initialisation + passthrough registration in the background.
+   * Called by start() immediately after the transport connects so the
+   * static meta-tools are always reachable, even while child servers are
+   * still connecting. Emits notifications/tools/list_changed when done.
+   */
+  private async _runHubInit(): Promise<void> {
+    logger.info('Initialising MCP Hub...');
+    await this.hub.initialise();
+    const stats = this.hub.getStats();
+    logger.info('MCP Hub initialised', {
+      connected: stats.connected,
+      total: stats.total,
+    });
 
-      // Populate the registry from the now-connected hub, apply built-in
-      // routing recommendations for known servers, then register all
-      // `routing: "passthrough"` tools as first-class MCP tools.
-      await this.registry.refresh();
-      applyBuiltInRecommendations(
+    // Populate the registry from the now-connected hub, apply built-in
+    // routing recommendations for known servers, then register all
+    // `routing: "passthrough"` tools as first-class MCP tools.
+    await this.registry.refresh();
+    applyBuiltInRecommendations(
+      this.registry.getAllTools(),
+      (server, name, meta) => this.registry.annotate(server, name, meta)
+    );
+
+    // Per-server routing overrides from ~/.mcp-conductor.json beat the
+    // built-in table. Loaded fresh here so wizard edits / hot-reload are
+    // reflected on the next server start without a process restart of the
+    // user's MCP client.
+    const conductorCfg = loadConductorConfig();
+    if (conductorCfg?.servers) {
+      const overridden = applyPerServerRouting(
         this.registry.getAllTools(),
-        (server, name, meta) => this.registry.annotate(server, name, meta)
+        conductorCfg.servers,
+        (server, name, meta) => this.registry.annotate(server, name, meta),
       );
-
-      // Per-server routing overrides from ~/.mcp-conductor.json beat the
-      // built-in table. Loaded fresh here so wizard edits / hot-reload are
-      // reflected on the next server start without a process restart of the
-      // user's MCP client.
-      const conductorCfg = loadConductorConfig();
-      if (conductorCfg?.servers) {
-        const overridden = applyPerServerRouting(
-          this.registry.getAllTools(),
-          conductorCfg.servers,
-          (server, name, meta) => this.registry.annotate(server, name, meta),
+      if (overridden > 0) {
+        logger.info(
+          `Per-server routing overrides applied to ${overridden} tool(s) from conductor config`,
         );
-        if (overridden > 0) {
-          logger.info(
-            `Per-server routing overrides applied to ${overridden} tool(s) from conductor config`,
-          );
-        }
       }
-
-      registerPassthroughTools(
-        this.registry,
-        this.server as unknown as import('./passthrough-registrar.js').McpServerLike,
-        this.hub,
-        undefined,
-        {
-          isEnabled: () => this.compareMode,
-          buildCompareStats: (server, tool, params, dur, bytes) =>
-            this.buildCompareStatsForPassthrough(server, tool, params, dur, bytes),
-        },
-      );
-      // B6: All passthrough tools are now registered. Set the flag so that
-      // tests (and future guards) can assert the ordering invariant:
-      // this._passthroughRegistrationComplete must be true before
-      // server.connect(transport) is called below.
-      this._passthroughRegistrationComplete = true;
-    } else {
-      // When useMockServers is active there are no passthrough tools to
-      // register, but we mark the flag so the transport-connect guard below
-      // does not need a separate branch.
-      this._passthroughRegistrationComplete = true;
     }
 
+    registerPassthroughTools(
+      this.registry,
+      this.server as unknown as import('./passthrough-registrar.js').McpServerLike,
+      this.hub,
+      undefined,
+      {
+        isEnabled: () => this.compareMode,
+        buildCompareStats: (server, tool, params, dur, bytes) =>
+          this.buildCompareStatsForPassthrough(server, tool, params, dur, bytes),
+      },
+    );
+
+    this._passthroughRegistrationComplete = true;
+
+    // Notify the parent MCP client that the tool list has grown — it will
+    // re-fetch tools/list and discover the newly registered
+    // <server>__<tool> passthrough tools.
+    this.server.sendToolListChanged();
+    logger.info('Passthrough tools registered; sent notifications/tools/list_changed');
+  }
+
+  async start(): Promise<void> {
     // Set up bridge handlers
     const handlers: BridgeHandlers = {
       callTool: async (serverName, toolName, params) => {
@@ -2537,21 +2589,29 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
     // Start bridge server
     await this.bridge.start();
 
-    // B6: Guard — passthrough registration MUST complete before the SDK
-    // transport connects. If this ever throws it indicates a code-path bug
-    // (e.g. an early-return inserted above that bypasses the flag assignment).
-    if (!this._passthroughRegistrationComplete) {
-      throw new Error(
-        'MCPExecutorServer: passthrough tool registration did not complete before transport connect. ' +
-        'This is a bug — do not call server.connect(transport) before registerPassthroughTools() returns.'
-      );
-    }
-
-    // Connect to stdio transport
+    // Connect to stdio transport immediately so the parent MCP client can
+    // discover static meta-tools (execute_code, set_mode, get_metrics, etc.)
+    // without waiting for child server connections to settle.
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    logger.info('MCP Executor server started');
+    logger.info('MCP Executor server started (static tools ready)');
+
+    if (!this.useMockServers) {
+      // Hub initialisation runs in the background. When it completes,
+      // _passthroughRegistrationComplete becomes true, the <server>__<tool>
+      // passthrough tools are registered, and a notifications/tools/list_changed
+      // is emitted so the parent re-fetches the full tool list.
+      this._hubInitPromise = this._runHubInit().catch((err) => {
+        logger.error('Hub initialisation failed', { err: String(err) });
+        // Re-throw so awaitReady() callers and tests see the failure.
+        throw err;
+      });
+    } else {
+      // No hub in mock mode — passthrough is trivially complete.
+      this._passthroughRegistrationComplete = true;
+      this._hubInitPromise = Promise.resolve();
+    }
   }
 
   /**
