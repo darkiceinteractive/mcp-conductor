@@ -29,6 +29,16 @@ export interface ExecutionResult {
     toolCalls: number;
     dataProcessedBytes: number;
     resultSizeBytes: number;
+    /**
+     * Sum of per-call durationMs reported by the bridge for every backend
+     * MCP tool call made inside the sandbox. Approximates the "passthrough
+     * equivalent" wall-clock time (ignoring per-call Claude roundtrip
+     * overhead, which the server cannot observe).
+     *
+     * Populated by the sandbox runtime; absent on fallback/error paths
+     * where no calls executed.
+     */
+    cumulativeToolCallDurationMs?: number;
   };
 }
 
@@ -75,6 +85,7 @@ const TIMEOUT_MS = ${timeoutMs};
 const __metrics = {
   toolCalls: 0,
   dataProcessedBytes: 0,
+  cumulativeToolCallDurationMs: 0,
 };
 
 // Logs collection
@@ -175,6 +186,7 @@ class MCPServerClient {
 
       const data = await response.json();
       const durationMs = Date.now() - startTime;
+      __metrics.cumulativeToolCallDurationMs += durationMs;
 
       if (data.metrics?.dataSize) {
         __metrics.dataProcessedBytes += data.metrics.dataSize;
@@ -1031,6 +1043,8 @@ export class DenoExecutor {
                 toolCalls: parsed.metrics?.toolCalls || 0,
                 dataProcessedBytes: parsed.metrics?.dataProcessedBytes || 0,
                 resultSizeBytes: 0, // Will be set by caller
+                cumulativeToolCallDurationMs:
+                  parsed.metrics?.cumulativeToolCallDurationMs || 0,
               },
             });
             return;

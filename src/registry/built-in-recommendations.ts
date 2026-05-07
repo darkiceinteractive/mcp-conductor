@@ -85,3 +85,50 @@ export function applyBuiltInRecommendations(
 
   return annotated;
 }
+
+/**
+ * Apply per-server routing overrides from `~/.mcp-conductor.json`.
+ *
+ * Walks every tool whose server has an explicit `routing` setting on its
+ * `ConductorServerConfig` entry and rewrites the tool's `routing` annotation
+ * to match. This runs AFTER {@link applyBuiltInRecommendations} so the
+ * per-server config wins over the built-in lookup table.
+ *
+ * Mapping:
+ *   - `'passthrough'` → set every tool's routing to `passthrough`
+ *   - `'execute_code'` → set every tool's routing to `execute_code`
+ *   - `'auto'` (or absent) → no-op; built-in/user routing remains in effect
+ *
+ * @param tools           Tools returned by `registry.getAllTools()`.
+ * @param serversConfig   `conductorConfig.servers` map (server-name → config).
+ * @param annotate        `registry.annotate` bound to the ToolRegistry.
+ * @returns               The number of tools that were re-annotated.
+ */
+export function applyPerServerRouting(
+  tools: Array<{ server: string; name: string; routing?: string }>,
+  serversConfig: Record<string, { routing?: 'passthrough' | 'execute_code' | 'auto' }>,
+  annotate: (
+    server: string,
+    name: string,
+    meta: { routing: 'passthrough' | 'execute_code' },
+  ) => void,
+): number {
+  let annotated = 0;
+
+  for (const tool of tools) {
+    const serverCfg = serversConfig[tool.server];
+    if (!serverCfg) continue;
+
+    const mode = serverCfg.routing;
+    // 'auto' or omitted leaves whatever was already set in place.
+    if (mode !== 'passthrough' && mode !== 'execute_code') continue;
+
+    // Skip when the tool already has the desired routing — avoid a no-op write.
+    if (tool.routing === mode) continue;
+
+    annotate(tool.server, tool.name, { routing: mode });
+    annotated++;
+  }
+
+  return annotated;
+}

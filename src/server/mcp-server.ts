@@ -12,7 +12,10 @@ import { HttpBridge, type BridgeHandlers, type ServerInfo } from '../bridge/inde
 import { DenoExecutor, type ExecutionResult } from '../runtime/index.js';
 import { MCPHub } from '../hub/index.js';
 import { ToolRegistry } from '../registry/registry.js';
-import { applyBuiltInRecommendations } from '../registry/built-in-recommendations.js';
+import {
+  applyBuiltInRecommendations,
+  applyPerServerRouting,
+} from '../registry/built-in-recommendations.js';
 import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
@@ -59,6 +62,20 @@ export class MCPExecutorServer {
   private config: MCPExecutorConfig;
   private useMockServers: boolean;
   private currentMode: ExecutionMode;
+  /**
+   * Compare mode: when true, every tool call attaches a `compareStats` block
+   * to its response. For `passthrough_call` and auto-registered passthrough
+   * tools this triggers REAL double-execution (the same call is also run via
+   * an execute_code wrapper through the Deno sandbox) so the user can see
+   * actual measured durations + tokens for both routing paths.
+   *
+   * WARNING: enabling this doubles backend tool calls for passthrough paths.
+   * Destructive tools (delete/send/post/etc.) will fire twice. Toggle off
+   * after benchmarking or run only against read-only servers.
+   *
+   * Toggled at runtime via the `set_compare_mode` MCP tool. Not persisted.
+   */
+  private compareMode: boolean = false;
   private registry: ToolRegistry;
   private cache: CacheLayer;
   private gateway: ReliabilityGateway;
@@ -222,9 +239,12 @@ export class MCPExecutorServer {
 
     // Mode A: per-call token savings block.
     // Shown when show_token_savings flag is set on the call, OR when
-    // metrics.alwaysShowTokenSavings is enabled in the conductor config.
+    // metrics.alwaysShowTokenSavings is enabled in the conductor config,
+    // OR when compare mode is enabled (compareStats subsumes it).
     const wantSavings =
-      showTokenSavings === true || this.config.metrics.alwaysShowTokenSavings === true;
+      showTokenSavings === true ||
+      this.config.metrics.alwaysShowTokenSavings === true ||
+      this.compareMode === true;
 
     if (wantSavings) {
       const resultJson = result.result !== undefined ? JSON.stringify(result.result) : '';
@@ -237,10 +257,229 @@ export class MCPExecutorServer {
       output.tokenSavings = savings;
     }
 
+    // Compare mode: attach a unified compareStats block for execute_code.
+    // The "passthrough equivalent" tokens are computed exactly via
+    // computeTokenSavings (same formula used elsewhere). The "passthrough
+    // equivalent" wall-clock time is derived from the cumulative duration
+    // of the backend tool calls made during this run (server-side ground
+    // truth — does not include per-call Claude roundtrip overhead).
+    if (this.compareMode) {
+      const resultJson = result.result !== undefined ? JSON.stringify(result.result) : '';
+      const savings = computeTokenSavings({
+        toolCalls: result.metrics.toolCalls,
+        dataProcessedBytes: result.metrics.dataProcessedBytes,
+        codeChars: code.length,
+        resultBytes: resultJson.length,
+      });
+      const cumToolMs = result.metrics.cumulativeToolCallDurationMs ?? 0;
+
+      output.compareStats = {
+        path: 'execute_code',
+        execute_code: {
+          duration_ms: result.metrics.executionTimeMs,
+          tool_calls: result.metrics.toolCalls,
+          tokens: savings.actualExecutionTokens,
+          data_processed_bytes: result.metrics.dataProcessedBytes,
+          result_size_bytes: result.metrics.resultSizeBytes,
+        },
+        passthrough_equivalent: {
+          duration_ms: cumToolMs,
+          tokens: savings.estimatedPassthroughTokens,
+          note:
+            'Tokens computed exactly via computeTokenSavings. Duration is the server-side cumulative tool-call time; passthrough wall-clock for the client is higher (each call requires a separate Claude roundtrip).',
+        },
+        diff: {
+          tokens_saved: savings.tokensSaved,
+          tokens_savings_percent: savings.savingsPercent,
+          time_delta_ms: result.metrics.executionTimeMs - cumToolMs,
+        },
+      };
+    }
+
     return {
       content: [{ type: 'text', text: JSON.stringify(output) }],
       structuredContent: output,
     };
+  }
+
+  /**
+   * Run an execute_code wrapper for the given backend tool call. Used by
+   * compare mode on the passthrough side: the same call is executed both
+   * directly (passthrough) and through the Deno sandbox so the response
+   * can carry real measured durations + tokens for both routing paths.
+   *
+   * Side-effect: this fires a SECOND backend tool call on top of the
+   * original passthrough one. Callers must only invoke when compareMode is
+   * true.
+   *
+   * @returns Wrapper-execution metrics. Returns `null` if the wrapper run
+   *   fails to produce a result (caller falls back to passthrough-only stats).
+   */
+  private async runCompareExecuteCode(
+    server: string,
+    tool: string,
+    params: Record<string, unknown>,
+  ): Promise<{
+    durationMs: number;
+    success: boolean;
+    error?: string;
+    code: string;
+    codeChars: number;
+    resultBytes: number;
+    toolCalls: number;
+    dataProcessedBytes: number;
+    cumulativeToolCallDurationMs: number;
+  } | null> {
+    const code =
+      `return await mcp.server(${JSON.stringify(server)}).call(${JSON.stringify(tool)}, ${JSON.stringify(params)});`;
+
+    try {
+      const r = await this.executor.execute(code, {
+        timeoutMs: this.config.execution.defaultTimeoutMs,
+        bridgeUrl: this.bridge.getUrl(),
+        servers: [server],
+      });
+
+      const resultJson = r.result !== undefined ? JSON.stringify(r.result) : '';
+
+      return {
+        durationMs: r.metrics.executionTimeMs,
+        success: r.success,
+        error: r.error?.message,
+        code,
+        codeChars: code.length,
+        resultBytes: resultJson.length,
+        toolCalls: r.metrics.toolCalls,
+        dataProcessedBytes: r.metrics.dataProcessedBytes,
+        cumulativeToolCallDurationMs: r.metrics.cumulativeToolCallDurationMs ?? 0,
+      };
+    } catch (err) {
+      logger.warn('Compare-mode execute_code wrapper failed', {
+        server,
+        tool,
+        error: String(err),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Build the compareStats block for a passthrough call when compare mode
+   * is on. Combines real measured passthrough metrics with real measured
+   * execute_code wrapper metrics from {@link runCompareExecuteCode}.
+   */
+  private buildPassthroughCompareStats(args: {
+    passthrough: {
+      durationMs: number;
+      resultBytes: number;
+    };
+    exec: {
+      durationMs: number;
+      codeChars: number;
+      resultBytes: number;
+      toolCalls: number;
+      dataProcessedBytes: number;
+      cumulativeToolCallDurationMs: number;
+      success: boolean;
+      error?: string;
+    } | null;
+  }): Record<string, unknown> {
+    const { passthrough, exec } = args;
+
+    // Passthrough-side tokens: 1 call + raw result data in context.
+    const ptSavings = computeTokenSavings({
+      toolCalls: 1,
+      dataProcessedBytes: passthrough.resultBytes,
+      codeChars: 0,
+      resultBytes: passthrough.resultBytes,
+    });
+    const passthroughTokens = ptSavings.estimatedPassthroughTokens;
+
+    if (!exec) {
+      return {
+        path: 'passthrough',
+        passthrough: {
+          duration_ms: passthrough.durationMs,
+          tokens: passthroughTokens,
+          result_size_bytes: passthrough.resultBytes,
+        },
+        execute_code: null,
+        diff: null,
+        note: 'execute_code wrapper run failed; passthrough-only metrics shown.',
+      };
+    }
+
+    const execSavings = computeTokenSavings({
+      toolCalls: exec.toolCalls,
+      dataProcessedBytes: exec.dataProcessedBytes,
+      codeChars: exec.codeChars,
+      resultBytes: exec.resultBytes,
+    });
+    const execTokens = execSavings.actualExecutionTokens;
+
+    const tokensSaved = Math.max(0, passthroughTokens - execTokens);
+    const savingsPercent =
+      passthroughTokens > 0
+        ? Math.round((tokensSaved / passthroughTokens) * 1000) / 10
+        : 0;
+
+    return {
+      path: 'passthrough',
+      passthrough: {
+        duration_ms: passthrough.durationMs,
+        tokens: passthroughTokens,
+        result_size_bytes: passthrough.resultBytes,
+      },
+      execute_code: {
+        duration_ms: exec.durationMs,
+        tokens: execTokens,
+        result_size_bytes: exec.resultBytes,
+        tool_calls: exec.toolCalls,
+        cumulative_tool_call_duration_ms: exec.cumulativeToolCallDurationMs,
+        success: exec.success,
+        error: exec.error,
+      },
+      diff: {
+        tokens_saved: tokensSaved,
+        tokens_savings_percent: savingsPercent,
+        time_delta_ms: exec.durationMs - passthrough.durationMs,
+        faster: exec.durationMs < passthrough.durationMs ? 'execute_code' : 'passthrough',
+      },
+      note:
+        'Both paths executed against the live backend. Backend tool was called TWICE (once per path) — that is expected in compare mode.',
+    };
+  }
+
+  /**
+   * Whether compare mode is currently enabled. Exposed for the passthrough
+   * registrar so dynamically-registered <server>__<tool> handlers can attach
+   * a compareStats block on each call.
+   */
+  isCompareModeEnabled(): boolean {
+    return this.compareMode;
+  }
+
+  /**
+   * Run the execute_code wrapper for compare mode and return the assembled
+   * compareStats block. Used by the passthrough registrar.
+   *
+   * @internal
+   */
+  async buildCompareStatsForPassthrough(
+    server: string,
+    tool: string,
+    params: Record<string, unknown>,
+    passthroughDurationMs: number,
+    passthroughResultBytes: number,
+  ): Promise<Record<string, unknown>> {
+    const exec = await this.runCompareExecuteCode(server, tool, params);
+    return this.buildPassthroughCompareStats({
+      passthrough: {
+        durationMs: passthroughDurationMs,
+        resultBytes: passthroughResultBytes,
+      },
+      exec,
+    });
   }
 
   /**
@@ -736,6 +975,60 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       }
     );
 
+    // Register set_compare_mode tool — compare mode toggle.
+    this.server.registerTool(
+      'set_compare_mode',
+      {
+        title: 'Set Compare Mode',
+        description: `Toggle compare mode on/off. When ON, every tool response includes a 'compareStats' block showing measured speed + token data for both execute_code and passthrough routing.
+
+For passthrough_call and auto-registered <server>__<tool> passthrough tools, this triggers REAL double-execution: the same call also runs via an execute_code wrapper. Backend tool calls fire TWICE while compare mode is on — destructive tools (delete/send/post/etc.) will execute twice. Use against read-only servers, or toggle off when not benchmarking.
+
+Compare mode is process-local and resets to OFF on server restart.`,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          enabled: z.boolean().describe('true to enable compare mode, false to disable.'),
+        },
+        outputSchema: {
+          previous_enabled: z.boolean(),
+          current_enabled: z.boolean(),
+          message: z.string(),
+          warning: z.string().optional(),
+        },
+      },
+      async ({ enabled }) => {
+        const previous = this.compareMode;
+        this.compareMode = enabled;
+
+        if (previous !== enabled) {
+          logger.info('Compare mode toggled', { from: previous, to: enabled });
+        }
+
+        const output: Record<string, unknown> = {
+          previous_enabled: previous,
+          current_enabled: enabled,
+          message: enabled
+            ? 'Compare mode ENABLED. Every passthrough call will also run an execute_code wrapper; responses include compareStats.'
+            : 'Compare mode disabled.',
+        };
+
+        if (enabled) {
+          output.warning =
+            'Backend tool calls will fire TWICE while compare mode is on. Destructive tools (delete/send/post) will execute twice. Disable compare mode for normal operation.';
+        }
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }
+    );
+
     // Register reload_servers tool
     this.server.registerTool(
       'reload_servers',
@@ -1045,6 +1338,21 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
           // Add warning when used in execution mode
           if (this.currentMode === 'execution') {
             output['warning'] = '⚠️ INEFFICIENT: You used passthrough_call in execution mode. Use execute_code instead for 90%+ token savings. Each passthrough_call adds full request/response JSON to context.';
+          }
+
+          // Compare mode: also run an execute_code wrapper and attach a
+          // compareStats block with measured timings + tokens for both
+          // routing paths. Skipped against mock servers (the wrapper would
+          // try to talk to a real bridge that is not connected).
+          if (this.compareMode && !this.useMockServers) {
+            const stats = await this.buildCompareStatsForPassthrough(
+              server,
+              tool,
+              params || {},
+              durationMs,
+              resultStr.length,
+            );
+            output.compareStats = stats;
           }
 
           return {
@@ -2016,7 +2324,36 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
         this.registry.getAllTools(),
         (server, name, meta) => this.registry.annotate(server, name, meta)
       );
-      registerPassthroughTools(this.registry, this.server as unknown as import('./passthrough-registrar.js').McpServerLike, this.hub);
+
+      // Per-server routing overrides from ~/.mcp-conductor.json beat the
+      // built-in table. Loaded fresh here so wizard edits / hot-reload are
+      // reflected on the next server start without a process restart of the
+      // user's MCP client.
+      const conductorCfg = loadConductorConfig();
+      if (conductorCfg?.servers) {
+        const overridden = applyPerServerRouting(
+          this.registry.getAllTools(),
+          conductorCfg.servers,
+          (server, name, meta) => this.registry.annotate(server, name, meta),
+        );
+        if (overridden > 0) {
+          logger.info(
+            `Per-server routing overrides applied to ${overridden} tool(s) from conductor config`,
+          );
+        }
+      }
+
+      registerPassthroughTools(
+        this.registry,
+        this.server as unknown as import('./passthrough-registrar.js').McpServerLike,
+        this.hub,
+        undefined,
+        {
+          isEnabled: () => this.compareMode,
+          buildCompareStats: (server, tool, params, dur, bytes) =>
+            this.buildCompareStatsForPassthrough(server, tool, params, dur, bytes),
+        },
+      );
       // B6: All passthrough tools are now registered. Set the flag so that
       // tests (and future guards) can assert the ordering invariant:
       // this._passthroughRegistrationComplete must be true before

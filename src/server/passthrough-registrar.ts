@@ -63,6 +63,26 @@ export interface McpHubLike {
 }
 
 /**
+ * Optional compare-mode hook supplied by the server. When `isEnabled()`
+ * returns true, the auto-registered passthrough handler will additionally
+ * run an execute_code wrapper for the same call and attach a
+ * `compareStats` block to the response.
+ *
+ * NOTE: this fires the backend tool TWICE per call. Destructive tools are
+ * affected. Use only while benchmarking.
+ */
+export interface CompareModeHook {
+  isEnabled(): boolean;
+  buildCompareStats(
+    server: string,
+    tool: string,
+    params: Record<string, unknown>,
+    passthroughDurationMs: number,
+    passthroughResultBytes: number,
+  ): Promise<Record<string, unknown>>;
+}
+
+/**
  * Sanitise a raw name segment so it is safe to embed in an MCP tool name.
  * MCP tool names must match `^[a-zA-Z0-9_-]+$`.
  * Replace any character outside that set with `_`.
@@ -155,6 +175,7 @@ export const STATIC_TOOL_NAMES: ReadonlySet<string> = new Set([
   'reload_servers',
   'get_capabilities',
   'compare_modes',
+  'set_compare_mode',
   'passthrough_call',
   'brave_web_search',
   'add_server',
@@ -194,7 +215,8 @@ export function registerPassthroughTools(
   registry: ToolRegistry,
   mcpServer: McpServerLike,
   mcpHub: McpHubLike,
-  excludeNames?: ReadonlySet<string>
+  excludeNames?: ReadonlySet<string>,
+  compareHook?: CompareModeHook,
 ): number {
   const tools = registry.getAllTools();
   let registered = 0;
@@ -257,14 +279,39 @@ export function registerPassthroughTools(
       async (params: Record<string, unknown>) => {
         logger.debug(`Passthrough call: ${toolServer}.${toolName}`, { params });
 
+        const start = Date.now();
         const result = await mcpHub.callTool(toolServer, toolName, params);
+        const passthroughDurationMs = Date.now() - start;
 
         const resultStr =
           typeof result === 'string' ? result : JSON.stringify(result);
 
+        const structured: Record<string, unknown> = { success: true, result };
+
+        // Compare mode: run an execute_code wrapper for the same call and
+        // attach a compareStats block. Doubles backend traffic — gated by
+        // the explicit set_compare_mode toggle.
+        if (compareHook?.isEnabled()) {
+          try {
+            structured.compareStats = await compareHook.buildCompareStats(
+              toolServer,
+              toolName,
+              params,
+              passthroughDurationMs,
+              resultStr.length,
+            );
+          } catch (err) {
+            logger.warn('Compare-mode hook failed for passthrough tool', {
+              server: toolServer,
+              tool: toolName,
+              error: String(err),
+            });
+          }
+        }
+
         return {
           content: [{ type: 'text' as const, text: resultStr }],
-          structuredContent: { success: true, result },
+          structuredContent: structured,
         };
       }
     );

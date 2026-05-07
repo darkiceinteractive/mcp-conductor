@@ -91,6 +91,23 @@ export interface RateLimitConfig {
 }
 
 /**
+ * Per-server routing override.
+ *
+ * - `passthrough` — every tool from this server is exposed as a first-class
+ *   `<server>__<tool>` MCP tool, regardless of the per-tool `BUILT_IN_ROUTING`
+ *   table or any prior `recommend_routing --apply` annotations.
+ * - `execute_code` — none of this server's tools are exposed as first-class;
+ *   they're only reachable through `execute_code`. Use for servers whose
+ *   tools you always want to batch/transform inside the sandbox.
+ * - `auto` (default) — fall back to per-tool routing: the
+ *   `BUILT_IN_ROUTING` table for known servers, else `execute_code`.
+ *
+ * Per-server settings ALWAYS win over per-tool settings — when present, this
+ * field is the authoritative override.
+ */
+export type ServerRoutingMode = 'passthrough' | 'execute_code' | 'auto';
+
+/**
  * Server definition for conductor config
  */
 export interface ConductorServerConfig {
@@ -101,6 +118,11 @@ export interface ConductorServerConfig {
   env?: Record<string, string>;
   /** Rate limiting configuration for this server */
   rateLimit?: RateLimitConfig;
+  /**
+   * Force a routing strategy for every tool this server exposes.
+   * Defaults to `'auto'` when omitted. See {@link ServerRoutingMode}.
+   */
+  routing?: ServerRoutingMode;
 }
 
 /**
