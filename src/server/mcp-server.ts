@@ -48,6 +48,119 @@ import { getRoutingRecommendations } from '../cli/commands/routing.js';
 import { CacheLayer } from '../cache/index.js';
 import { ReliabilityGateway } from '../reliability/index.js';
 
+// ---------------------------------------------------------------------------
+// Result-budget helpers (exported so test/unit/result-budget.test.ts can
+// import them directly without standing up a full server instance).
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimate the token cost of an arbitrary value using the 3.8 chars/token
+ * heuristic (matches the constant in metrics-collector.ts and the audit doc).
+ */
+export function estimateResultTokens(value: unknown): number {
+  const json = JSON.stringify(value) ?? 'null';
+  return Math.ceil(json.length / 3.8);
+}
+
+/**
+ * Trim a result to fit within a token budget.
+ *
+ * - Arrays: binary-search for the largest prefix that fits.
+ * - Objects: drop keys from the end until the value fits.
+ * - Strings: clip at the char equivalent of the budget.
+ * - Primitives / other: serialise and clip the JSON string.
+ *
+ * Returns `{ wasTrimmed, result, meta? }`.
+ */
+export function trimResultToBudget(
+  value: unknown,
+  maxTokens: number,
+): { wasTrimmed: boolean; result: unknown; meta?: Record<string, unknown> } {
+  if (estimateResultTokens(value) <= maxTokens) {
+    return { wasTrimmed: false, result: value };
+  }
+
+  const originalBytes = JSON.stringify(value)?.length ?? 0;
+
+  if (Array.isArray(value)) {
+    // Binary search for largest prefix that fits
+    let lo = 0;
+    let hi = value.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      if (estimateResultTokens(value.slice(0, mid)) <= maxTokens) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return {
+      wasTrimmed: true,
+      result: value.slice(0, lo),
+      meta: {
+        to_tokens: maxTokens,
+        original_length: value.length,
+        trimmed_to: lo,
+        original_bytes: originalBytes,
+      },
+    };
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    let kept = keys.length;
+    while (kept > 0) {
+      const subset = Object.fromEntries(
+        keys.slice(0, kept).map((k) => [k, (value as Record<string, unknown>)[k]]),
+      );
+      if (estimateResultTokens(subset) <= maxTokens) {
+        return {
+          wasTrimmed: true,
+          result: subset,
+          meta: {
+            to_tokens: maxTokens,
+            original_keys: keys.length,
+            trimmed_to: kept,
+            original_bytes: originalBytes,
+          },
+        };
+      }
+      kept--;
+    }
+    return {
+      wasTrimmed: true,
+      result: {},
+      meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+    };
+  }
+
+  if (typeof value === 'string') {
+    const maxChars = Math.floor(maxTokens * 3.8);
+    if (value.length <= maxChars) {
+      return { wasTrimmed: false, result: value };
+    }
+    return {
+      wasTrimmed: true,
+      result: value.slice(0, maxChars) + '…[trimmed]',
+      meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+    };
+  }
+
+  // Fallback: serialise then clip
+  const json = JSON.stringify(value) ?? 'null';
+  const maxChars = Math.floor(maxTokens * 3.8);
+  return {
+    wasTrimmed: true,
+    result: json.slice(0, maxChars) + '…[trimmed]',
+    meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+  };
+}
+
+/** Default server-side result token cap applied when max_result_tokens is not
+ *  explicitly set by the caller. Matches the audit recommendation of 2000
+ *  tokens for lean defaults (overridable via config in a future pass). */
+const DEFAULT_MAX_RESULT_TOKENS = 2000;
+
 /**
  * MCP Executor Server
  */
@@ -202,11 +315,29 @@ export class MCPExecutorServer {
     servers: string[] | undefined,
     verbose: boolean | undefined,
     showTokenSavings: boolean | undefined,
+    maxResultTokensParam?: number,
   ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
+    // Apply result budget: use explicit param, or fall back to the lean default.
+    // Pass 0 to disable trimming entirely.
+    const budgetTokens =
+      maxResultTokensParam !== undefined
+        ? maxResultTokensParam
+        : DEFAULT_MAX_RESULT_TOKENS;
+
+    let resultValue = result.result;
+    let resultTrimmedMeta: Record<string, unknown> | undefined;
+    if (budgetTokens > 0 && resultValue !== undefined) {
+      const trimmed = trimResultToBudget(resultValue, budgetTokens);
+      if (trimmed.wasTrimmed) {
+        resultValue = trimmed.result;
+        resultTrimmedMeta = trimmed.meta;
+      }
+    }
+
     const executionMetrics = this.metricsCollector.recordExecution({
       executionId: result.executionId,
       code,
-      result: result.result,
+      result: resultValue,
       success: result.success,
       durationMs: result.metrics.executionTimeMs,
       toolCalls: result.metrics.toolCalls,
@@ -221,9 +352,13 @@ export class MCPExecutorServer {
 
     const output: Record<string, unknown> = {
       success: result.success,
-      result: result.result,
+      result: resultValue,
       error: result.error,
     };
+
+    if (resultTrimmedMeta !== undefined) {
+      output.result_trimmed = resultTrimmedMeta;
+    }
 
     if (verbose) {
       output.metrics = {
@@ -495,15 +630,7 @@ export class MCPExecutorServer {
       'execute_code',
       {
         title: 'Execute Code',
-        description: `Execute TypeScript/JavaScript code to perform MCP operations efficiently.
-
-**Token Savings:** 90-98% vs individual tool calls. Batch operations in a single execution.
-
-**API:** \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`
-
-**Example:** \`const files = await mcp.filesystem.call('list_directory', { path: '/src' }); return files;\`
-
-Use passthrough_call only for debugging - it has HIGH token cost.`,
+        description: `Execute TypeScript/JavaScript in a Deno sandbox to call backend MCP tools and return only the final result. Saves 90–98% tokens vs individual tool calls. API: mcp.server('name').call('tool', params) | mcp.searchTools('query') | mcp.log('msg'). Use mcp.compact()/summarize()/budget() inside the script to shrink results further. Avoid passthrough_call except when you need to inspect raw tool input/output for debugging — it puts the full request and response JSON into context and is 10–100x more token-expensive than execute_code. For single lightweight lookups (search, calendar, email), a direct passthrough tool call is fine. Answer tersely from tool results rather than narrating tool use.`,
         annotations: {
           // execute_code proxies arbitrary code that can call any backend MCP
           // tool, so it inherits the most permissive capability surface.
@@ -527,6 +654,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             'For passthrough-mode tools the block carries a "not applicable" note. ' +
             'Can also be enabled globally via metrics.alwaysShowTokenSavings in ~/.mcp-conductor.json. ' +
             'Default: false.',
+          ),
+          max_result_tokens: z.number().optional().describe(
+            'Cap the result to approximately this many tokens. If the result exceeds the budget ' +
+            'it is progressively trimmed (arrays truncated, deep structures clipped) and ' +
+            'result_trimmed metadata is attached. Default: 2000. Set to 0 to disable trimming.',
           ),
         },
         outputSchema: {
@@ -555,7 +687,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           }).optional(),
         },
       },
-      async ({ code, servers, timeout_ms, stream, verbose, show_token_savings }, extra) => {
+      async ({ code, servers, timeout_ms, stream, verbose, show_token_savings, max_result_tokens }, extra) => {
         const timeoutMs = Math.min(
           timeout_ms || this.config.execution.defaultTimeoutMs,
           this.config.execution.maxTimeoutMs
@@ -608,7 +740,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             signal: extra?.signal,
             executionId,
           });
-          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings);
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings, max_result_tokens);
         } finally {
           if (execStream) {
             // Flip the stream out of `running` so StreamManager's normal
