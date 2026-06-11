@@ -59,6 +59,16 @@ export interface MCPExecutorConfig {
   hotReload: HotReloadConfig;
   metrics: MetricsConfig;
   servers: ServersConfig;
+  /**
+   * Token-space dictionary compression for outbound tool results.
+   * Default: disabled. Enable via `dictCompression.enabled: true` or
+   * the DICT_COMPRESS=1 environment variable.
+   */
+  dictCompression?: {
+    enabled: boolean;
+    mapPath?: string;
+    topK?: number;
+  };
 }
 
 export interface ServerInfo {

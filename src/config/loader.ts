@@ -66,6 +66,24 @@ function loadFromEnv(config: MCPExecutorConfig): MCPExecutorConfig {
     config.servers.allowList = allowedServers.split(',').map((s) => s.trim());
   }
 
+  // Dictionary compression env overrides (DICT_COMPRESS=1, DICT_MAP_PATH=...)
+  const dictCompress = env[ENV_VARS.DICT_COMPRESS];
+  if (dictCompress === '1' || dictCompress === 'true') {
+    if (!config.dictCompression) {
+      config.dictCompression = { enabled: true };
+    } else {
+      config.dictCompression.enabled = true;
+    }
+  }
+  const dictMapPath = env[ENV_VARS.DICT_MAP_PATH];
+  if (dictMapPath) {
+    if (!config.dictCompression) {
+      config.dictCompression = { enabled: false, mapPath: dictMapPath };
+    } else {
+      config.dictCompression.mapPath = dictMapPath;
+    }
+  }
+
   return config;
 }
 
@@ -112,6 +130,9 @@ function deepMerge(target: MCPExecutorConfig, source: Partial<MCPExecutorConfig>
   }
   if (source.servers) {
     result.servers = { ...result.servers, ...source.servers };
+  }
+  if (source.dictCompression) {
+    result.dictCompression = { ...result.dictCompression, ...source.dictCompression };
   }
 
   return result;

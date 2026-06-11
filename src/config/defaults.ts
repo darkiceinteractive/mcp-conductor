@@ -80,6 +80,10 @@ export const ENV_VARS = {
   STREAM_ENABLED: 'MCP_EXECUTOR_STREAM_ENABLED',
   ALLOWED_SERVERS: 'MCP_EXECUTOR_ALLOWED_SERVERS',
   MAX_MEMORY_MB: 'MCP_EXECUTOR_MAX_MEMORY_MB',
+  /** Enable dictionary compression: DICT_COMPRESS=1 */
+  DICT_COMPRESS: 'DICT_COMPRESS',
+  /** Path to .dict-map.json: DICT_MAP_PATH=/path/to/.dict-map.json */
+  DICT_MAP_PATH: 'DICT_MAP_PATH',
 } as const;
 
 /**

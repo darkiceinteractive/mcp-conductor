@@ -286,6 +286,34 @@ program
 registerDaemonCommands(program);
 
 // ----------------------------------------------------------------
+// mine-dict — token-space dictionary map miner
+// ----------------------------------------------------------------
+program
+  .command('mine-dict')
+  .description('Mine a project for recurring high-token strings and emit a .dict-map.json')
+  .argument('<project-root>', 'Root directory of the project to scan')
+  .option('-o, --output <path>', 'Output path for .dict-map.json (default: <project-root>/.dict-map.json)')
+  .option('-k, --top-k <n>', 'Maximum dictionary entries (default: 50)', '50')
+  .option('-s, --session <file>', 'Session JSONL file to include in phrase mining (repeatable)', (v: string, arr: string[]) => { arr.push(v); return arr; }, [] as string[])
+  .option('-v, --verbose', 'Print mining stats to stderr')
+  .action(async (projectRoot: string, opts: { output?: string; topK: string; session: string[]; verbose?: boolean }) => {
+    const { runMinerCLI } = await import('../compression/miner.js');
+    const output = opts.output ?? `${projectRoot}/.dict-map.json`;
+    try {
+      await runMinerCLI({
+        projectRoot,
+        output,
+        sessionFiles: opts.session,
+        topK: parseInt(opts.topK, 10),
+        verbose: opts.verbose ?? false,
+      });
+    } catch (err) {
+      console.error(pc.red(`mine-dict failed: ${String(err)}`));
+      process.exit(1);
+    }
+  });
+
+// ----------------------------------------------------------------
 // parse
 // ----------------------------------------------------------------
 program.parseAsync(process.argv).catch((err) => {
