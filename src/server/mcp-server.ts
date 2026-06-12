@@ -47,6 +47,13 @@ import { testServer } from '../cli/commands/test-server.js';
 import { getRoutingRecommendations } from '../cli/commands/routing.js';
 import { CacheLayer } from '../cache/index.js';
 import { ReliabilityGateway } from '../reliability/index.js';
+import {
+  setDiagMode,
+  getDiagMode,
+  renderDiagTrailer,
+  type DiagMode,
+  type DiagPayload,
+} from './diag-mode.js';
 
 // ---------------------------------------------------------------------------
 // Result-budget helpers (exported so test/unit/result-budget.test.ts can
@@ -308,6 +315,9 @@ export class MCPExecutorServer {
   /**
    * Record metrics + shape the execute_code tool response. Extracted so the
    * progress/cancel wiring in the handler stays readable.
+   *
+   * @param wallMs  Optional outer wall time (ms) for the whole execute_code call,
+   *                used by the diag trailer. Falls back to executionTimeMs when absent.
    */
   private finaliseExecuteCodeResult(
     result: ExecutionResult,
@@ -316,7 +326,8 @@ export class MCPExecutorServer {
     verbose: boolean | undefined,
     showTokenSavings: boolean | undefined,
     maxResultTokensParam?: number,
-  ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
+    wallMs?: number,
+  ): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
     // Apply result budget: use explicit param, or fall back to the lean default.
     // Pass 0 to disable trimming entirely.
     const budgetTokens =
@@ -431,8 +442,30 @@ export class MCPExecutorServer {
       };
     }
 
+    const content: Array<{ type: 'text'; text: string }> = [
+      { type: 'text', text: JSON.stringify(output) },
+    ];
+
+    // Diag trailer: append as a separate content item when mode is on.
+    const diagMode = getDiagMode();
+    if (diagMode !== 'off') {
+      const resultJson = output.result !== undefined ? JSON.stringify(output.result) : '';
+      const diagPayload: DiagPayload = {
+        callType: 'execute_code',
+        toolName: 'execute_code',
+        wallMs: wallMs ?? result.metrics.executionTimeMs,
+        rawBytesIn: result.metrics.dataProcessedBytes,
+        outBytesToModel: resultJson.length,
+        scriptChars: code.length,
+      };
+      const trailer = renderDiagTrailer(diagPayload, diagMode);
+      if (trailer) {
+        content.push({ type: 'text', text: trailer });
+      }
+    }
+
     return {
-      content: [{ type: 'text', text: JSON.stringify(output) }],
+      content,
       structuredContent: output,
     };
   }
@@ -731,6 +764,7 @@ export class MCPExecutorServer {
         }
 
         let result: ExecutionResult | undefined;
+        const execWallStart = performance.now();
         try {
           result = await this.executor.execute(code, {
             timeoutMs,
@@ -740,7 +774,8 @@ export class MCPExecutorServer {
             signal: extra?.signal,
             executionId,
           });
-          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings, max_result_tokens);
+          const execWallMs = Math.round(performance.now() - execWallStart);
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings, max_result_tokens, execWallMs);
         } finally {
           if (execStream) {
             // Flip the stream out of `running` so StreamManager's normal
@@ -1161,6 +1196,31 @@ Compare mode is process-local and resets to OFF on server restart.`,
       }
     );
 
+    // Register set_diag_mode tool — per-call telemetry trailer toggle.
+    this.server.registerTool(
+      'set_diag_mode',
+      {
+        title: 'Set Diag Mode',
+        description: 'Toggle mcp-conductor diagnostic mode on/off. When on, every execute_code and passthrough call result has a diag trailer appended showing wall time, byte counts, and estimated token savings. Modes: "off" (default, zero overhead), "summary" (one-line trailer, ~80 tokens/call), "verbose" (multi-line breakdown, ~250 tokens/call). Process-local; resets to "off" on restart. Use for testing token-savings claims and identifying slow backend servers.',
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          mode: z.enum(['off', 'summary', 'verbose']).describe('Diagnostic mode to set.'),
+        },
+      },
+      async ({ mode }) => {
+        const newMode = setDiagMode(mode as DiagMode);
+        logger.info('Diag mode set', { mode: newMode });
+        return {
+          content: [{ type: 'text', text: `diag mode: ${newMode}` }],
+        };
+      }
+    );
+
     // Register reload_servers tool
     this.server.registerTool(
       'reload_servers',
@@ -1487,8 +1547,28 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
             output.compareStats = stats;
           }
 
+          const passthroughContent: Array<{ type: 'text'; text: string }> = [
+            { type: 'text', text: JSON.stringify(output) },
+          ];
+
+          // Diag trailer for passthrough_call.
+          const ptDiagMode = getDiagMode();
+          if (ptDiagMode !== 'off') {
+            const ptDiagPayload: DiagPayload = {
+              callType: 'passthrough',
+              toolName: `${server}.${tool}`,
+              wallMs: durationMs,
+              rawBytesIn: resultStr.length,
+              outBytesToModel: resultStr.length,
+            };
+            const ptTrailer = renderDiagTrailer(ptDiagPayload, ptDiagMode);
+            if (ptTrailer) {
+              passthroughContent.push({ type: 'text', text: ptTrailer });
+            }
+          }
+
           return {
-            content: [{ type: 'text', text: JSON.stringify(output) }],
+            content: passthroughContent,
             structuredContent: output,
           };
         } catch (error) {

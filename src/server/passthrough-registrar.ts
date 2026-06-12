@@ -24,6 +24,7 @@ import * as z from 'zod';
 import { logger } from '../utils/index.js';
 import type { ToolRegistry } from '../registry/registry.js';
 import type { MCPHub } from '../hub/mcp-hub.js';
+import { getDiagMode, renderDiagTrailer, type DiagPayload } from './diag-mode.js';
 
 /**
  * Minimal interface of McpServer that the registrar needs.
@@ -45,7 +46,7 @@ export interface McpServerLike {
       inputSchema: Record<string, unknown>;
     },
     handler: (params: Record<string, unknown>) => Promise<{
-      content: [{ type: 'text'; text: string }];
+      content: Array<{ type: 'text'; text: string }>;
       structuredContent?: Record<string, unknown>;
     }>
   ): void;
@@ -192,6 +193,7 @@ export const STATIC_TOOL_NAMES: ReadonlySet<string> = new Set([
   'diagnose_server',
   'recommend_routing',
   'export_to_claude',
+  'set_diag_mode',
 ]);
 
 /**
@@ -309,8 +311,28 @@ export function registerPassthroughTools(
           }
         }
 
+        const ptContent: Array<{ type: 'text'; text: string }> = [
+          { type: 'text' as const, text: resultStr },
+        ];
+
+        // Diag trailer for auto-registered passthrough tools.
+        const ptDiagMode = getDiagMode();
+        if (ptDiagMode !== 'off') {
+          const ptDiagPayload: DiagPayload = {
+            callType: 'passthrough_tool',
+            toolName: `${toolServer}.${toolName}`,
+            wallMs: passthroughDurationMs,
+            rawBytesIn: resultStr.length,
+            outBytesToModel: resultStr.length,
+          };
+          const ptTrailer = renderDiagTrailer(ptDiagPayload, ptDiagMode);
+          if (ptTrailer) {
+            ptContent.push({ type: 'text' as const, text: ptTrailer });
+          }
+        }
+
         return {
-          content: [{ type: 'text' as const, text: resultStr }],
+          content: ptContent,
           structuredContent: structured,
         };
       }

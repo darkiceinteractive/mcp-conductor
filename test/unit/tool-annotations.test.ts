@@ -48,6 +48,7 @@ const EXPECTED: Record<string, ToolAnnotations> = {
   compare_modes:      { readOnlyHint: true,  idempotentHint: true,  openWorldHint: false },
   set_mode:           { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: false },
   set_compare_mode:   { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: false },
+  set_diag_mode:      { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
   reload_servers:     { destructiveHint: true, idempotentHint: false, openWorldHint: true },
   brave_web_search:   { readOnlyHint: true,  idempotentHint: false, openWorldHint: true },
   add_server:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
