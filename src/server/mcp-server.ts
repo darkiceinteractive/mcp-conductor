@@ -630,7 +630,7 @@ export class MCPExecutorServer {
       'execute_code',
       {
         title: 'Execute Code',
-        description: `Execute TypeScript/JavaScript in a Deno sandbox to call backend MCP tools and return only the final result. Saves 90–98% tokens vs individual tool calls. API: mcp.server('name').call('tool', params) | mcp.searchTools('query') | mcp.log('msg'). Use mcp.compact()/summarize()/budget() inside the script to shrink results further. Avoid passthrough_call except when you need to inspect raw tool input/output for debugging — it puts the full request and response JSON into context and is 10–100x more token-expensive than execute_code. For single lightweight lookups (search, calendar, email), a direct passthrough tool call is fine. Answer tersely from tool results rather than narrating tool use.`,
+        description: `Run TypeScript/JavaScript in a Deno sandbox to call backend MCP tools (proxied by mcp-conductor) and return only the final result. **Use this for any task that needs data from a backend MCP server.** Workflow: call \`discover_tools\` first to see which servers/tools are available, then write a script here that calls them via \`mcp.server('name').call('tool', params)\`. Saves 90–98% tokens vs individual passthrough calls. API: \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`. Use \`mcp.compact()\` / \`summarize()\` / \`budget()\` inside the script to shrink results further. Avoid \`passthrough_call\` except for raw debugging — it puts full request/response JSON into context (10–100× more tokens). For single lightweight lookups (search, calendar, email) where a tool is already exposed as \`<server>__<tool>\`, calling it directly is fine. Answer tersely from tool results rather than narrating tool use.`,
         annotations: {
           // execute_code proxies arbitrary code that can call any backend MCP
           // tool, so it inherits the most permissive capability surface.
@@ -771,7 +771,7 @@ export class MCPExecutorServer {
       'list_servers',
       {
         title: 'List Servers',
-        description: 'List all MCP servers connected through MCP Executor.',
+        description: 'List all backend MCP servers connected through mcp-conductor with connection status, tool counts, and routing mode. Use to confirm a specific server (e.g. ibkr, github, alphavantage, filesystem) is connected before calling its tools. Sister tool to `discover_tools` (which searches across all servers) and `diagnose_server` (which inspects one server\'s health in detail).',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -837,7 +837,7 @@ export class MCPExecutorServer {
       'discover_tools',
       {
         title: 'Discover Tools',
-        description: 'Search for available tools across all connected MCP servers.',
+        description: 'Search across all backend MCP servers proxied by mcp-conductor for available tools. **Call this first** when you need to find a tool — pass a query like "options chain" or "send email" and it returns matching tools with their server, name, description, and input schema. Pair with `execute_code` to actually invoke the tool. Without this step the model only sees mcp-conductor\'s own meta-tools, not the hundreds of backend tools it proxies.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -933,7 +933,7 @@ export class MCPExecutorServer {
       'get_metrics',
       {
         title: 'Get Metrics',
-        description: 'Get detailed aggregated metrics for the current session including token savings, performance, and usage patterns.',
+        description: 'Get aggregated mcp-conductor session metrics: token savings (estimated passthrough cost vs actual execute_code cost), per-server call counts, wall-time percentiles, hot paths. Use to verify the token-savings model is delivering, or to identify slow backend servers.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -1112,7 +1112,7 @@ export class MCPExecutorServer {
       'set_compare_mode',
       {
         title: 'Set Compare Mode',
-        description: `Toggle compare mode on/off. When ON, every tool response includes a 'compareStats' block showing measured speed + token data for both execute_code and passthrough routing.
+        description: `**mcp-conductor diagnostic mode.** Toggle compare mode on/off. When ON, every tool response includes a 'compareStats' block showing measured speed + token data for both execute_code and passthrough routing.
 
 For passthrough_call and auto-registered <server>__<tool> passthrough tools, this triggers REAL double-execution: the same call also runs via an execute_code wrapper. Backend tool calls fire TWICE while compare mode is on — destructive tools (delete/send/post/etc.) will execute twice. Use against read-only servers, or toggle off when not benchmarking.
 
@@ -1202,7 +1202,7 @@ Compare mode is process-local and resets to OFF on server restart.`,
       'get_capabilities',
       {
         title: 'Get Capabilities',
-        description: 'Get detailed information about MCP Executor capabilities and configuration.',
+        description: 'Get detailed information about mcp-conductor capabilities, modes, and configuration. Returns the current operating mode (execution/passthrough/hybrid), connected server count, registered tool counts, and config file path.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -2254,8 +2254,7 @@ Optionally strips the imported servers from their source configs.`,
       'test_server',
       {
         title: 'Test Server',
-        description: `Transiently connect to a named MCP server from conductor config, list its tools and measure latency.
-Does NOT persist the connection or register the server. The server must be present in ~/.mcp-conductor.json.`,
+        description: `Transiently connect to a named mcp-conductor backend server, list its tools, and measure handshake latency. Does NOT persist the connection or register the server. Use to verify a server in \`~/.mcp-conductor.json\` can boot and advertise tools before adding it to the live conductor. The server must already be present in the config.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -2295,8 +2294,7 @@ Does NOT persist the connection or register the server. The server must be prese
       'diagnose_server',
       {
         title: 'Diagnose Server',
-        description: `Diagnose a registered MCP server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state.
-Returns actionable information about why a server may be failing.`,
+        description: `Diagnose a single mcp-conductor backend server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state. Use when a server appears connected in \`list_servers\` but its tools aren't returning data, or when \`tools/list\` shows fewer tools than expected.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
