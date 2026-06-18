@@ -1,0 +1,63 @@
+{
+  "generated": "2026-05-07T03:49:08.433Z",
+  "suite": "D4 — kv-concurrent-load",
+  "sustainedMs": 30000,
+  "scenarios": [
+    {
+      "scenario": "same-key-90r10w",
+      "workload": "90/10 read-heavy",
+      "clientCount": 50,
+      "keyCount": 1,
+      "readPct": 90,
+      "writePct": 10,
+      "totalOps": 615285,
+      "opsPerSec": 123057,
+      "p50LatencyMs": 0,
+      "p99LatencyMs": 1,
+      "corruptionDetected": false,
+      "durationMs": 5000
+    },
+    {
+      "scenario": "same-key-10r90w",
+      "workload": "10/90 write-heavy",
+      "clientCount": 50,
+      "keyCount": 1,
+      "readPct": 10,
+      "writePct": 90,
+      "totalOps": 352976,
+      "opsPerSec": 70595,
+      "p50LatencyMs": 1,
+      "p99LatencyMs": 1,
+      "corruptionDetected": false,
+      "durationMs": 5000
+    },
+    {
+      "scenario": "spread-1k-50r50w",
+      "workload": "50/50 balanced",
+      "clientCount": 50,
+      "keyCount": 1000,
+      "readPct": 50,
+      "writePct": 50,
+      "totalOps": 432650,
+      "opsPerSec": 86530,
+      "p50LatencyMs": 0,
+      "p99LatencyMs": 1,
+      "corruptionDetected": false,
+      "durationMs": 5000
+    },
+    {
+      "scenario": "ttl-eviction",
+      "workload": "TTL pressure",
+      "clientCount": 2,
+      "keyCount": 20,
+      "readPct": 50,
+      "writePct": 50,
+      "totalOps": 40,
+      "opsPerSec": 0,
+      "p50LatencyMs": 0,
+      "p99LatencyMs": 0,
+      "corruptionDetected": false,
+      "durationMs": 5500
+    }
+  ]
+}

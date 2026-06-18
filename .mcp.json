@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mcp-conductor": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@darkiceinteractive/mcp-conductor@latest"
+      ]
+    }
+  }
+}

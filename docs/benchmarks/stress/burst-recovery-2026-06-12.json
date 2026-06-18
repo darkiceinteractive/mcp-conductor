@@ -1,0 +1,34 @@
+{
+  "suite": "S4-burst-recovery",
+  "timestamp": "2026-06-12T04:16:59.980Z",
+  "environment": {
+    "stress": false,
+    "node": "v26.0.0",
+    "platform": "darwin"
+  },
+  "config": {
+    "burstCalls": 100,
+    "idleMs": 500,
+    "jobLatencyMs": 5,
+    "poolSize": 4,
+    "minIdleSlots": 0
+  },
+  "burst1": {
+    "callCount": 100,
+    "p50Ms": 7.93579200000022,
+    "throughputCallsPerSec": 263.83356346699577,
+    "wallMs": 379.02683300000035
+  },
+  "idlePeriod": {
+    "durationMs": 500.87300000000005,
+    "poolSlotsAfterIdle": 0
+  },
+  "burst2": {
+    "callCount": 100,
+    "p50Ms": 5.615082999999686,
+    "throughputCallsPerSec": 619.7188335652118,
+    "wallMs": 161.36349999999993
+  },
+  "recoveryRatio": 0.7075642859590486,
+  "degraded": false
+}

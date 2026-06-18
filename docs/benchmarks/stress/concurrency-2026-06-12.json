@@ -1,0 +1,47 @@
+{
+  "suite": "S1-execute-code-concurrency",
+  "timestamp": "2026-06-12T04:17:21.172Z",
+  "environment": {
+    "stress": false,
+    "node": "v26.0.0",
+    "platform": "darwin"
+  },
+  "levels": [
+    {
+      "concurrent": 10,
+      "successRate": 1,
+      "successCount": 10,
+      "failureCount": 0,
+      "p50": 52.558917000000065,
+      "p95": 52.92591700000003,
+      "p99": 52.92591700000003,
+      "p999": 52.92591700000003,
+      "throughputCallsPerSec": 188.46677566328563,
+      "wallTimeMs": 53.059749999999894
+    },
+    {
+      "concurrent": 50,
+      "successRate": 1,
+      "successCount": 50,
+      "failureCount": 0,
+      "p50": 51.109833999999864,
+      "p95": 51.127292000000125,
+      "p99": 51.14854100000002,
+      "p999": 51.14854100000002,
+      "throughputCallsPerSec": 975.7819125864102,
+      "wallTimeMs": 51.24095800000009
+    },
+    {
+      "concurrent": 100,
+      "successRate": 1,
+      "successCount": 100,
+      "failureCount": 0,
+      "p50": 60.44145800000001,
+      "p95": 60.46112499999981,
+      "p99": 60.463708,
+      "p999": 60.47066599999994,
+      "throughputCallsPerSec": 1650.30572821283,
+      "wallTimeMs": 60.59483300000011
+    }
+  ]
+}

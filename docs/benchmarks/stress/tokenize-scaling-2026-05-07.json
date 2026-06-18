@@ -1,0 +1,140 @@
+{
+  "date": "2026-05-07",
+  "results": [
+    {
+      "inputLabel": "1KB",
+      "inputBytes": 1196,
+      "piiDensity": 1,
+      "tokenizeMs": 0.78,
+      "outputBytes": 1176,
+      "reverseMapSize": 1,
+      "throughputKBps": 1506.2
+    },
+    {
+      "inputLabel": "10KB",
+      "inputBytes": 10867,
+      "piiDensity": 1,
+      "tokenizeMs": 0.62,
+      "outputBytes": 10767,
+      "reverseMapSize": 10,
+      "throughputKBps": 17029.7
+    },
+    {
+      "inputLabel": "100KB",
+      "inputBytes": 108715,
+      "piiDensity": 1,
+      "tokenizeMs": 5.59,
+      "outputBytes": 107707,
+      "reverseMapSize": 100,
+      "throughputKBps": 18975.9
+    },
+    {
+      "inputLabel": "1MB",
+      "inputBytes": 1124198,
+      "piiDensity": 1,
+      "tokenizeMs": 58.88,
+      "outputBytes": 1114005,
+      "reverseMapSize": 1024,
+      "throughputKBps": 18646
+    },
+    {
+      "inputLabel": "10MB",
+      "inputBytes": 11357381,
+      "piiDensity": 1,
+      "tokenizeMs": 602.25,
+      "outputBytes": 11256682,
+      "reverseMapSize": 10240,
+      "throughputKBps": 18416.4
+    },
+    {
+      "inputLabel": "1KB",
+      "inputBytes": 1456,
+      "piiDensity": 10,
+      "tokenizeMs": 0.08,
+      "outputBytes": 1356,
+      "reverseMapSize": 10,
+      "throughputKBps": 17903.9
+    },
+    {
+      "inputLabel": "10KB",
+      "inputBytes": 13659,
+      "piiDensity": 10,
+      "tokenizeMs": 0.8,
+      "outputBytes": 12651,
+      "reverseMapSize": 100,
+      "throughputKBps": 16730.2
+    },
+    {
+      "inputLabel": "100KB",
+      "inputBytes": 137352,
+      "piiDensity": 10,
+      "tokenizeMs": 8.41,
+      "outputBytes": 127411,
+      "reverseMapSize": 1000,
+      "throughputKBps": 15946.4
+    },
+    {
+      "inputLabel": "1MB",
+      "inputBytes": 1425700,
+      "piiDensity": 10,
+      "tokenizeMs": 93.77,
+      "outputBytes": 1325001,
+      "reverseMapSize": 10240,
+      "throughputKBps": 14847.9
+    },
+    {
+      "inputLabel": "10MB",
+      "inputBytes": 14450463,
+      "piiDensity": 10,
+      "tokenizeMs": 931.71,
+      "outputBytes": 13458766,
+      "reverseMapSize": 102400,
+      "throughputKBps": 15146
+    },
+    {
+      "inputLabel": "1KB",
+      "inputBytes": 1501,
+      "piiDensity": 100,
+      "tokenizeMs": 0.09,
+      "outputBytes": 1380,
+      "reverseMapSize": 11,
+      "throughputKBps": 16049.2
+    },
+    {
+      "inputLabel": "10KB",
+      "inputBytes": 13853,
+      "piiDensity": 100,
+      "tokenizeMs": 0.99,
+      "outputBytes": 12779,
+      "reverseMapSize": 106,
+      "throughputKBps": 13688.6
+    },
+    {
+      "inputLabel": "100KB",
+      "inputBytes": 139153,
+      "piiDensity": 100,
+      "tokenizeMs": 8.46,
+      "outputBytes": 128645,
+      "reverseMapSize": 1056,
+      "throughputKBps": 16053.6
+    },
+    {
+      "inputLabel": "1MB",
+      "inputBytes": 1444699,
+      "piiDensity": 100,
+      "tokenizeMs": 88.74,
+      "outputBytes": 1338138,
+      "reverseMapSize": 10811,
+      "throughputKBps": 15898.2
+    },
+    {
+      "inputLabel": "10MB",
+      "inputBytes": 14645913,
+      "piiDensity": 100,
+      "tokenizeMs": 923.57,
+      "outputBytes": 13595594,
+      "reverseMapSize": 108101,
+      "throughputKBps": 15486.3
+    }
+  ]
+}

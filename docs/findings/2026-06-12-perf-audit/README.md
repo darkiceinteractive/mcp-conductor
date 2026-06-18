@@ -12,6 +12,8 @@ a remediation order.
 
 ## How to read
 
+- **Start here first: [`SYNTHESIS.md`](SYNTHESIS.md)** — ranked priority matrix, three crisis findings, headline impact table, and a sequenced Phase 1 implementation plan across all 16 findings.
+
 Start with `00-baseline.md` (system state at audit time), then read findings
 `01–15` in any order. `SYNTHESIS.md` cross-references all findings, ranks by
 severity, and recommends action priorities.

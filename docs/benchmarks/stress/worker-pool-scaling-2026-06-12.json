@@ -1,0 +1,49 @@
+{
+  "suite": "S2-worker-pool-scaling",
+  "timestamp": "2026-06-12T04:17:49.203Z",
+  "environment": {
+    "stress": false,
+    "node": "v26.0.0",
+    "platform": "darwin"
+  },
+  "callsPerRun": 200,
+  "jobLatencyMs": 50,
+  "sizes": [
+    {
+      "poolSize": 1,
+      "totalWallMs": 10583.868125,
+      "meanPerCallMs": 52.919340625000004,
+      "throughputCallsPerSec": 18.896682917617134
+    },
+    {
+      "poolSize": 2,
+      "totalWallMs": 5368.0191250000025,
+      "meanPerCallMs": 26.840095625000014,
+      "throughputCallsPerSec": 37.25769140213335
+    },
+    {
+      "poolSize": 4,
+      "totalWallMs": 2612.1757080000025,
+      "meanPerCallMs": 13.060878540000012,
+      "throughputCallsPerSec": 76.56452794790319
+    },
+    {
+      "poolSize": 8,
+      "totalWallMs": 1296.0748329999988,
+      "meanPerCallMs": 6.4803741649999935,
+      "throughputCallsPerSec": 154.31207744159644
+    },
+    {
+      "poolSize": 16,
+      "totalWallMs": 677.9026249999988,
+      "meanPerCallMs": 3.389513124999994,
+      "throughputCallsPerSec": 295.02762288315427
+    },
+    {
+      "poolSize": 32,
+      "totalWallMs": 377.80708400000003,
+      "meanPerCallMs": 1.8890354200000001,
+      "throughputCallsPerSec": 529.3706986182397
+    }
+  ]
+}

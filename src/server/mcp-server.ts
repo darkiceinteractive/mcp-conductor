@@ -54,6 +54,13 @@ import {
   type DiagMode,
   type DiagPayload,
 } from './diag-mode.js';
+import {
+  buildServerSummary,
+  buildCatalogInstructions,
+  buildServerCatalogDetail,
+  type ServerCatalogEntry,
+} from './catalog.js';
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 // ---------------------------------------------------------------------------
 // Result-budget helpers (exported so test/unit/result-budget.test.ts can
@@ -262,12 +269,17 @@ export class MCPExecutorServer {
     // Initialise Deno executor
     this.executor = new DenoExecutor(config.sandbox);
 
-    // Initialise MCP Hub for real server connections
+    // Initialise MCP Hub for real server connections.
+    // Wire connect_timeout_ms from conductor config (default 10 s) so a single
+    // slow/hung child server cannot block conductor startup.
+    const conductorCfgForHub = loadConductorConfig();
+    const connectTimeoutMs = conductorCfgForHub?.connect_timeout_ms ?? 10000;
     this.hub = new MCPHub({
       servers: config.servers,
       autoReconnect: true,
       reconnectDelayMs: 5000,
       maxReconnectAttempts: 3,
+      connectionTimeoutMs: connectTimeoutMs,
     });
 
     // Initialise the ToolRegistry backed by the hub.
@@ -651,13 +663,137 @@ export class MCPExecutorServer {
   }
 
   /**
+   * Build catalog entries from live hub state (or mock servers for tests).
+   * Safe to call at any time — returns empty array before hub is initialised.
+   */
+  private buildCatalogEntries(): ServerCatalogEntry[] {
+    if (this.useMockServers) {
+      return Array.from(this.mockServers.entries()).map(([name, data]) =>
+        buildServerSummary(name, data.tools, 'connected')
+      );
+    }
+    return this.hub.listServers().map((s) => {
+      const tools = this.hub.getServerTools(s.name);
+      const status: ServerCatalogEntry['status'] =
+        s.status === 'connected'
+          ? 'connected'
+          : s.status === 'error'
+          ? 'failed'
+          : 'connecting';
+      return buildServerSummary(s.name, tools, status);
+    });
+  }
+
+  /**
+   * Build and set the catalog instructions on the underlying MCP Server.
+   *
+   * The instructions field is included in every initialize response, giving
+   * the client a compact description of all proxied backend servers without
+   * requiring an extra tool call.
+   *
+   * Note: relies on the SDK-private `_instructions` field on the underlying
+   * Server instance (SDK v1.29 — confirmed in
+   * node_modules/@modelcontextprotocol/sdk/dist/cjs/server/index.js:53,282).
+   * A test (catalog.test.ts) reads the field back to detect SDK renames.
+   */
+  private setCatalogInstructions(): void {
+    const conductorCfg = loadConductorConfig();
+    const budgetTokens = conductorCfg?.catalog?.instructions_budget_tokens ?? 1200;
+    const entries = this.buildCatalogEntries();
+    const instructions = buildCatalogInstructions(entries, budgetTokens);
+
+    // Set on the underlying Server (not McpServer) — McpServer exposes it as
+    // `this.server.server` (readonly public field). SDK v1.29 stores instructions
+    // on the private `_instructions` field (index.js:53); read back in initialize (index.js:282).
+    (this.server.server as unknown as Record<string, unknown>)['_instructions'] = instructions;
+
+    const approxTokens = Math.ceil(instructions.length / 4);
+    const serverCount = entries.length;
+    const toolCount = entries.reduce((s, e) => s + e.toolCount, 0);
+    logger.info(`Catalog: ${serverCount} servers, ${toolCount} tools, instructions ≈ ${approxTokens} tokens`);
+  }
+
+  /**
    * Register all 24 static MCP tools on the SDK server instance.
    * Called from the constructor — runs synchronously before `start()`.
    * Passthrough tools (dynamic, registry-backed) are registered later in
    * `start()` via `registerPassthroughTools()`, strictly before the SDK
    * transport connects (B6 ordering invariant).
+   *
+   * Also registers the `conductor://catalog` resource and
+   * `conductor://catalog/{server}` resource template here — registration
+   * MUST happen before transport.connect() (capability guard) and is safe
+   * to do pre-hub because read callbacks are lazy (called at request time).
    */
   private registerTools(): void {
+    // ── Catalog resources ──────────────────────────────────────────────────
+    // Register pre-connect (capabilities guard). Read callbacks run lazily
+    // at request time so they always reflect live hub state.
+
+    // Static resource: conductor://catalog — full catalog in markdown
+    this.server.registerResource(
+      'conductor-catalog',
+      'conductor://catalog',
+      {
+        title: 'Backend tool catalog',
+        description: 'Markdown catalog of all backend MCP servers proxied by mcp-conductor, with per-server tool lists.',
+        mimeType: 'text/markdown',
+      },
+      (_uri) => {
+        const entries = this.buildCatalogEntries();
+        const sections = entries.map((e) => {
+          const tools = this.useMockServers
+            ? (this.mockServers.get(e.name)?.tools ?? [])
+            : this.hub.getServerTools(e.name);
+          return buildServerCatalogDetail(e.name, tools);
+        });
+        const content =
+          `# mcp-conductor Backend Catalog\n\n` +
+          `${entries.length} server${entries.length !== 1 ? 's' : ''}, ` +
+          `${entries.reduce((s, e) => s + e.toolCount, 0)} tools total.\n\n` +
+          (sections.length > 0 ? sections.join('\n') : '_No servers connected._\n');
+        return {
+          contents: [{ uri: 'conductor://catalog', mimeType: 'text/markdown', text: content }],
+        };
+      },
+    );
+
+    // Template resource: conductor://catalog/{server} — per-server detail
+    this.server.registerResource(
+      'conductor-catalog-server',
+      new ResourceTemplate('conductor://catalog/{server}', {
+        list: () => {
+          const entries = this.buildCatalogEntries();
+          return {
+            resources: entries.map((e) => ({
+              uri: `conductor://catalog/${e.name}`,
+              name: `${e.name} tool catalog`,
+              description: e.summary,
+              mimeType: 'text/markdown',
+            })),
+          };
+        },
+      }),
+      {
+        title: 'Per-server tool catalog',
+        description: 'Markdown tool list for a specific backend MCP server.',
+        mimeType: 'text/markdown',
+      },
+      (uri, variables) => {
+        const rawServer = variables['server'];
+        const serverName = Array.isArray(rawServer)
+          ? (rawServer[0] ?? '')
+          : (rawServer ?? '');
+        const tools = this.useMockServers
+          ? (this.mockServers.get(serverName)?.tools ?? [])
+          : this.hub.getServerTools(serverName);
+        const content = buildServerCatalogDetail(serverName, tools);
+        return {
+          contents: [{ uri: uri.toString(), mimeType: 'text/markdown', text: content }],
+        };
+      },
+    );
+
     // Register execute_code tool
     this.server.registerTool(
       'execute_code',
@@ -1242,6 +1378,20 @@ Compare mode is process-local and resets to OFF on server restart.`,
       },
       async () => {
         const result = await this.reloadServers();
+
+        // Rebuild catalog instructions from the now-refreshed hub state so
+        // future initialize requests get an up-to-date catalog. Also notify
+        // connected clients that the tool and resource lists changed.
+        try {
+          this.setCatalogInstructions();
+          this.server.sendToolListChanged();
+          this.server.sendResourceListChanged();
+        } catch (err) {
+          // Must not fail the reload response — log and continue.
+          logger.warn('Failed to rebuild catalog or send list-changed after reload', {
+            error: String(err),
+          });
+        }
 
         const output = {
           added: result.added,
@@ -2569,6 +2719,12 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       // this._passthroughRegistrationComplete must be true before
       // server.connect(transport) is called below.
       this._passthroughRegistrationComplete = true;
+
+      // Build catalog instructions from live hub state and embed in the
+      // initialize response. Must happen after hub.initialise() so tool
+      // caches are populated, and before transport.connect() so the first
+      // client that sends initialize already sees the catalog.
+      this.setCatalogInstructions();
     } else {
       // When useMockServers is active there are no passthrough tools to
       // register, but we mark the flag so the transport-connect guard below

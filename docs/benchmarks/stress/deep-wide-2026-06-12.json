@@ -1,0 +1,65 @@
+{
+  "date": "2026-06-12",
+  "results": [
+    {
+      "shape": "deep-100",
+      "depth": 100,
+      "width": 1,
+      "keyDerivationMs": 0.28,
+      "tokenizeMs": 1.43,
+      "cacheWriteMs": 0.27,
+      "cacheReadMs": 0.08,
+      "totalMs": 2.05
+    },
+    {
+      "shape": "deep-500",
+      "depth": 500,
+      "width": 1,
+      "keyDerivationMs": 0.16,
+      "tokenizeMs": 0.13,
+      "cacheWriteMs": 0.03,
+      "cacheReadMs": 0,
+      "totalMs": 0.32
+    },
+    {
+      "shape": "deep-1000",
+      "depth": 1000,
+      "width": 1,
+      "keyDerivationMs": 0.21,
+      "tokenizeMs": 2.77,
+      "cacheWriteMs": 0.07,
+      "cacheReadMs": 0.01,
+      "totalMs": 3.06
+    },
+    {
+      "shape": "wide-10000",
+      "depth": 1,
+      "width": 10000,
+      "keyDerivationMs": 46.75,
+      "tokenizeMs": 2.77,
+      "cacheWriteMs": 0.48,
+      "cacheReadMs": 0.01,
+      "totalMs": 50.01
+    },
+    {
+      "shape": "wide-100000",
+      "depth": 1,
+      "width": 100000,
+      "keyDerivationMs": 360.32,
+      "tokenizeMs": 49.53,
+      "cacheWriteMs": 5.35,
+      "cacheReadMs": 0.02,
+      "totalMs": 415.22
+    },
+    {
+      "shape": "mixed-100d-1000w",
+      "depth": 100,
+      "width": 1000,
+      "keyDerivationMs": 0.39,
+      "tokenizeMs": 0.6,
+      "cacheWriteMs": 0.05,
+      "cacheReadMs": 0.01,
+      "totalMs": 1.05
+    }
+  ]
+}
