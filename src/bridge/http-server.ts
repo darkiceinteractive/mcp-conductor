@@ -539,6 +539,9 @@ export class HttpBridge {
         result,
         metrics: {
           durationMs: Date.now() - startTime,
+          // dataSize = byte length of the full JSON-serialised backend result.
+          // This is the actual payload size that passthrough_call would inject into
+          // context verbatim, so it is the correct baseline for computeTokenSavings().
           dataSize: resultStr.length,
         },
         ...(reverseMap && Object.keys(reverseMap).length > 0 ? { reverseMap } : {}),

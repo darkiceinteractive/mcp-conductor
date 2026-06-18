@@ -147,10 +147,12 @@ function makeFakeEntries(count: number): ServerCatalogEntry[] {
 }
 
 describe('buildCatalogInstructions', () => {
-  it('contains discover_tools guidance', () => {
+  it('contains execute_code inline guidance', () => {
+    // F1: catalog header now directs to execute_code directly, not discover_tools first.
     const entries = makeFakeEntries(3);
     const instructions = buildCatalogInstructions(entries);
-    expect(instructions).toContain('discover_tools');
+    expect(instructions).toContain('execute_code');
+    expect(instructions).toContain("mcp.server('<name>').call('<tool>', args)");
   });
 
   it('contains execute_code guidance', () => {
@@ -183,7 +185,7 @@ describe('buildCatalogInstructions', () => {
   it('returns valid guidance string for empty server list', () => {
     const instructions = buildCatalogInstructions([]);
     expect(instructions).toContain('mcp-conductor proxies');
-    expect(instructions).toContain('discover_tools');
+    expect(instructions).toContain('execute_code');
     expect(typeof instructions).toBe('string');
     expect(instructions.length).toBeGreaterThan(0);
   });

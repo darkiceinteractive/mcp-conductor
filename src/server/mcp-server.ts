@@ -19,7 +19,7 @@ import {
 import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
-import { MetricsCollector, computeTokenSavings, type TokenSavings } from '../metrics/index.js';
+import { MetricsCollector, computeTokenSavings, type TokenSavings, TOOL_CALL_OVERHEAD_TOKENS, TOKENS_PER_KB, CODE_CHARS_PER_TOKEN, JSON_CHARS_PER_TOKEN } from '../metrics/index.js';
 import { shutdownStreamManager } from '../streaming/index.js';
 import { shutdownMetricsCollector } from '../metrics/index.js';
 import { shutdownModeHandler } from '../modes/index.js';
@@ -799,7 +799,7 @@ export class MCPExecutorServer {
       'execute_code',
       {
         title: 'Execute Code',
-        description: `Run TypeScript/JavaScript in a Deno sandbox to call backend MCP tools (proxied by mcp-conductor) and return only the final result. **Use this for any task that needs data from a backend MCP server.** Workflow: call \`discover_tools\` first to see which servers/tools are available, then write a script here that calls them via \`mcp.server('name').call('tool', params)\`. Saves 90–98% tokens vs individual passthrough calls. API: \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`. Use \`mcp.compact()\` / \`summarize()\` / \`budget()\` inside the script to shrink results further. Avoid \`passthrough_call\` except for raw debugging — it puts full request/response JSON into context (10–100× more tokens). For single lightweight lookups (search, calendar, email) where a tool is already exposed as \`<server>__<tool>\`, calling it directly is fine. Answer tersely from tool results rather than narrating tool use.`,
+        description: `Run TypeScript/JavaScript in a Deno sandbox to call backend MCP tools (proxied by mcp-conductor) and return only the final result. **Use execute_code whenever a backend tool may return a large or multi-item result (issue/PR lists, search results, file contents, API or graph responses) — filter inside the script and return only what you need. For a single tiny known value, a direct call is fine.** Optionally call \`discover_tools\` first if you don't know the tool name, then write a script here that calls them via \`mcp.server('name').call('tool', params)\`. Saves 90–98% tokens vs individual passthrough calls. API: \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`. Use \`mcp.compact()\` / \`summarize()\` / \`budget()\` inside the script to shrink results further. Avoid \`passthrough_call\` except for raw debugging — it puts full request/response JSON into context (10–100× more tokens). Answer tersely from tool results rather than narrating tool use.`,
         annotations: {
           // execute_code proxies arbitrary code that can call any backend MCP
           // tool, so it inherits the most permissive capability surface.
@@ -1008,7 +1008,7 @@ export class MCPExecutorServer {
       'discover_tools',
       {
         title: 'Discover Tools',
-        description: 'Search across all backend MCP servers proxied by mcp-conductor for available tools. **Call this first** when you need to find a tool — pass a query like "options chain" or "send email" and it returns matching tools with their server, name, description, and input schema. Pair with `execute_code` to actually invoke the tool. Without this step the model only sees mcp-conductor\'s own meta-tools, not the hundreds of backend tools it proxies.',
+        description: 'Search across all backend MCP servers proxied by mcp-conductor for available tools. Pass a query like "options chain" or "send email" and it returns matching tools with their server, name, description, and relevance score. Pair with `execute_code` to actually invoke the tool. Without this step the model only sees mcp-conductor\'s own meta-tools, not the hundreds of backend tools it proxies.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -1514,17 +1514,19 @@ Returns estimated token usage and approach for each mode.`,
         const toolCalls = estimated_tool_calls || 5;
         const dataKb = estimated_data_kb || 10;
 
-        // Estimate tokens for passthrough mode
-        // Each tool call involves request + response in context
-        const tokensPerToolCall = 200; // Average tokens per tool call overhead
-        const tokensPerKb = 250; // Approximate tokens per KB of data
-        const passthroughTokens = (toolCalls * tokensPerToolCall) + (dataKb * tokensPerKb);
+        // Estimate tokens for passthrough mode using the same formula as
+        // computeTokenSavings() in metrics-collector.ts so estimates are consistent.
+        // passthroughTokens = (toolCalls × TOOL_CALL_OVERHEAD_TOKENS) + (dataKB × TOKENS_PER_KB)
+        const passthroughTokens = (toolCalls * TOOL_CALL_OVERHEAD_TOKENS) + (dataKb * TOKENS_PER_KB);
 
-        // Estimate tokens for execution mode
-        // Code + summarised result
-        const codeTokens = 100; // Typical code block
-        const resultTokens = 50; // Summarised result
-        const executionTokens = codeTokens + resultTokens;
+        // Estimate tokens for execution mode.
+        // We don't have real code/result bytes at estimation time, so use conservative
+        // proxies: ~50-char/token average code at CODE_CHARS_PER_TOKEN; result assumed
+        // ~10% of input data (filtered in-sandbox) at JSON_CHARS_PER_TOKEN.
+        const estimatedCodeChars = 300; // Typical short filtering script
+        const estimatedResultChars = Math.max(200, dataKb * 1024 * 0.1); // ~10% of raw data
+        const executionTokens = Math.ceil(estimatedCodeChars / CODE_CHARS_PER_TOKEN) +
+          Math.ceil(estimatedResultChars / JSON_CHARS_PER_TOKEN);
 
         const savingsPercent = Math.round(((passthroughTokens - executionTokens) / passthroughTokens) * 100);
 

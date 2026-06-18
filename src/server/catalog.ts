@@ -290,7 +290,7 @@ export function buildCatalogInstructions(
   const header =
     `mcp-conductor proxies ${totalServers} backend MCP server${totalServers !== 1 ? 's' : ''} (${totalTools} tools total). ` +
     `Their schemas stay out of context to save tokens. ` +
-    `To use any of them: call discover_tools to find a tool, then execute_code to invoke it via mcp.server('<name>').call('<tool>', args). Catalog:`;
+    `To call a backend tool inline, use execute_code: mcp.server('<name>').call('<tool>', args). Catalog:`;
 
   const footer = `\nFull per-server detail: read resource conductor://catalog or call list_servers.`;
 
