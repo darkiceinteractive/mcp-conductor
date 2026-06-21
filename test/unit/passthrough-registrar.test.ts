@@ -16,6 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   buildPassthroughToolName,
   registerPassthroughTools,
+  coerceParamsToSchema,
   type McpServerLike,
   type McpHubLike,
 } from '../../src/server/passthrough-registrar.js';
@@ -67,6 +68,63 @@ function makeHub(result: unknown = { data: 'ok' }): McpHubLike & {
     },
   };
 }
+
+// ─── coerceParamsToSchema (F9) ────────────────────────────────────────────────
+
+describe('coerceParamsToSchema', () => {
+  it('coerces string to number when schema declares type:integer', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: { count: { type: 'integer' }, query: { type: 'string' } },
+    };
+    const result = coerceParamsToSchema({ count: '5', query: 'hello' }, schema);
+    expect(result.count).toBe(5);
+    expect(result.query).toBe('hello');
+  });
+
+  it('coerces string to number when schema declares type:number', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: { offset: { type: 'number' } },
+    };
+    expect(coerceParamsToSchema({ offset: '0' }, schema).offset).toBe(0);
+  });
+
+  it('coerces string "true"/"false" to boolean when schema declares type:boolean', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: { spellcheck: { type: 'boolean' } },
+    };
+    expect(coerceParamsToSchema({ spellcheck: 'true' }, schema).spellcheck).toBe(true);
+    expect(coerceParamsToSchema({ spellcheck: 'false' }, schema).spellcheck).toBe(false);
+  });
+
+  it('leaves already-numeric values unchanged', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: { count: { type: 'integer' } },
+    };
+    expect(coerceParamsToSchema({ count: 10 }, schema).count).toBe(10);
+  });
+
+  it('leaves params with no matching schema property unchanged', () => {
+    const schema = { type: 'object' as const, properties: {} };
+    expect(coerceParamsToSchema({ mystery: 'x' }, schema).mystery).toBe('x');
+  });
+
+  it('does not coerce a non-numeric string to a number (NaN guard)', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: { count: { type: 'integer' } },
+    };
+    expect(coerceParamsToSchema({ count: 'five' }, schema).count).toBe('five');
+  });
+
+  it('returns params unchanged when schema has no properties', () => {
+    const original = { query: 'mcp architecture' };
+    expect(coerceParamsToSchema(original, {})).toEqual(original);
+  });
+});
 
 // ─── buildPassthroughToolName ─────────────────────────────────────────────────
 
@@ -135,6 +193,40 @@ describe('registerPassthroughTools', () => {
       server: 'filesystem',
       tool: 'read_file',
       params: { path: '/tmp/test.txt' },
+    });
+  });
+
+  it('handler coerces string count/offset to integers before calling hub (F9)', async () => {
+    const tools: ToolDefinition[] = [
+      {
+        server: 'brave-search',
+        name: 'brave_web_search',
+        description: 'Search',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            count: { type: 'integer' },
+            offset: { type: 'integer' },
+          },
+        },
+        routing: 'passthrough',
+      },
+    ];
+
+    const server = makeServer();
+    const hub = makeHub([]);
+    registerPassthroughTools(makeRegistry(tools) as never, server, hub);
+
+    const handler = server._registrations[0].handler;
+    // Simulate model passing count/offset as strings (the F9 bug)
+    await handler({ query: 'mcp architecture', count: '5', offset: '0' });
+
+    expect(hub._calls).toHaveLength(1);
+    expect(hub._calls[0].params).toEqual({
+      query: 'mcp architecture',
+      count: 5,   // coerced to number
+      offset: 0,  // coerced to number
     });
   });
 
