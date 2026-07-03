@@ -1,0 +1,15 @@
+{
+  "generated": "2026-06-12T04:17:19.838Z",
+  "suite": "D3 — broadcast-storm",
+  "clientCount": 10,
+  "messagesPerSecPerClient": 10,
+  "durationMs": 5000,
+  "totalSent": 470,
+  "totalReceived": 4700,
+  "expectedReceived": 4700,
+  "lossRate": 0,
+  "p50LatencyMs": 1,
+  "p99LatencyMs": 20,
+  "maxLatencyMs": 26,
+  "envelopeGuardViolations": 0
+}

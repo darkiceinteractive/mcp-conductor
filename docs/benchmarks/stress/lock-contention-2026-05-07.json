@@ -1,0 +1,50 @@
+{
+  "generated": "2026-05-07T03:48:48.419Z",
+  "suite": "D2 — lock-contention-storm",
+  "scenarios": [
+    {
+      "scenario": "50x1-hot-key",
+      "clientCount": 50,
+      "keys": 1,
+      "p50AcquireMs": 114,
+      "p99AcquireMs": 117,
+      "maxWaitMs": 117,
+      "acquireCount": 150,
+      "deadlockDetected": false,
+      "durationMs": 352
+    },
+    {
+      "scenario": "50x5-spread-keys",
+      "clientCount": 50,
+      "keys": 5,
+      "p50AcquireMs": 21,
+      "p99AcquireMs": 23,
+      "maxWaitMs": 23,
+      "acquireCount": 200,
+      "deadlockDetected": false,
+      "durationMs": 93
+    },
+    {
+      "scenario": "50x50-low-contention",
+      "clientCount": 50,
+      "keys": 50,
+      "p50AcquireMs": 1,
+      "p99AcquireMs": 1,
+      "maxWaitMs": 1,
+      "acquireCount": 250,
+      "deadlockDetected": false,
+      "durationMs": 15
+    },
+    {
+      "scenario": "hostile-orphan-release",
+      "clientCount": 2,
+      "keys": 1,
+      "p50AcquireMs": 51,
+      "p99AcquireMs": 51,
+      "maxWaitMs": 51,
+      "acquireCount": 1,
+      "deadlockDetected": false,
+      "durationMs": 51
+    }
+  ]
+}

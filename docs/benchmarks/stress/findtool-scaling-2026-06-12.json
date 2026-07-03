@@ -1,0 +1,29 @@
+{
+  "date": "2026-06-12",
+  "results": [
+    {
+      "indexSize": 100,
+      "buildMs": 4.24,
+      "queryTop3Ms": 3.82,
+      "queryTop10Ms": 0.79,
+      "queryTop100Ms": 0.09,
+      "p99Ms": 0.07
+    },
+    {
+      "indexSize": 1000,
+      "buildMs": 112.35,
+      "queryTop3Ms": 0.52,
+      "queryTop10Ms": 0.44,
+      "queryTop100Ms": 0.42,
+      "p99Ms": 0.46
+    },
+    {
+      "indexSize": 10000,
+      "buildMs": 70.69,
+      "queryTop3Ms": 3.37,
+      "queryTop10Ms": 2.55,
+      "queryTop100Ms": 39.56,
+      "p99Ms": 359.45
+    }
+  ]
+}

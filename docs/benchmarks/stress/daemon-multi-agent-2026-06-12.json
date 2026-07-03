@@ -1,0 +1,47 @@
+{
+  "generated": "2026-06-12T04:18:33.391Z",
+  "suite": "D1 — daemon-multi-agent-storm",
+  "sustainedMs": 30000,
+  "scenarios": [
+    {
+      "clientCount": 5,
+      "successRate": 1,
+      "totalOps": 77812,
+      "kvKeysAtPeak": 10,
+      "maxExpectedKvKeys": 50,
+      "heapUsedMbBefore": 12,
+      "heapUsedMbAfter": 13,
+      "durationMs": 5000
+    },
+    {
+      "clientCount": 10,
+      "successRate": 1,
+      "totalOps": 35833,
+      "kvKeysAtPeak": 20,
+      "maxExpectedKvKeys": 100,
+      "heapUsedMbBefore": 15,
+      "heapUsedMbAfter": 18,
+      "durationMs": 5026
+    },
+    {
+      "clientCount": 25,
+      "successRate": 1,
+      "totalOps": 546250,
+      "kvKeysAtPeak": 50,
+      "maxExpectedKvKeys": 250,
+      "heapUsedMbBefore": 19,
+      "heapUsedMbAfter": 40,
+      "durationMs": 30019
+    },
+    {
+      "clientCount": 50,
+      "successRate": 1,
+      "totalOps": 240300,
+      "kvKeysAtPeak": 100,
+      "maxExpectedKvKeys": 500,
+      "heapUsedMbBefore": 41,
+      "heapUsedMbAfter": 49,
+      "durationMs": 30054
+    }
+  ]
+}

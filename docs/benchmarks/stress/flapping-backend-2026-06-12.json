@@ -1,0 +1,255 @@
+{
+  "suite": "R2 — flapping-backend",
+  "date": "2026-06-12",
+  "flapPeriod": 10,
+  "callDelayMs": 20,
+  "totalCalls": 200,
+  "result": {
+    "totalCalls": 200,
+    "successes": 90,
+    "failures": 50,
+    "circuitOpenFastFails": 60,
+    "effectiveSuccessRate": 0.6428571428571429,
+    "stateTransitions": [
+      {
+        "callIndex": 12,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 22,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 33,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 41,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 53,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 61,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 73,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 81,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 93,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 101,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 113,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 121,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 133,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 141,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 153,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 161,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 173,
+        "state": "open",
+        "outcome": "failure"
+      },
+      {
+        "callIndex": 181,
+        "state": "closed",
+        "outcome": "success"
+      },
+      {
+        "callIndex": 193,
+        "state": "open",
+        "outcome": "failure"
+      }
+    ],
+    "everTripped": true,
+    "everRecovered": true,
+    "windowStats": [
+      {
+        "window": 0,
+        "windowType": "success",
+        "gatewaySuccesses": 10,
+        "gatewayFailures": 0,
+        "circuitOpen": 0
+      },
+      {
+        "window": 1,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 2,
+        "windowType": "success",
+        "gatewaySuccesses": 8,
+        "gatewayFailures": 0,
+        "circuitOpen": 2
+      },
+      {
+        "window": 3,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 4,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 5,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 6,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 7,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 8,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 9,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 10,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 11,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 12,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 13,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 14,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 15,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 16,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 17,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      },
+      {
+        "window": 18,
+        "windowType": "success",
+        "gatewaySuccesses": 9,
+        "gatewayFailures": 0,
+        "circuitOpen": 1
+      },
+      {
+        "window": 19,
+        "windowType": "failure",
+        "gatewaySuccesses": 0,
+        "gatewayFailures": 5,
+        "circuitOpen": 5
+      }
+    ]
+  }
+}

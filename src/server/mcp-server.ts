@@ -19,7 +19,7 @@ import {
 import { registerPassthroughTools } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
-import { MetricsCollector, computeTokenSavings, type TokenSavings } from '../metrics/index.js';
+import { MetricsCollector, computeTokenSavings, type TokenSavings, TOOL_CALL_OVERHEAD_TOKENS, TOKENS_PER_KB, CODE_CHARS_PER_TOKEN, JSON_CHARS_PER_TOKEN } from '../metrics/index.js';
 import { shutdownStreamManager } from '../streaming/index.js';
 import { shutdownMetricsCollector } from '../metrics/index.js';
 import { shutdownModeHandler } from '../modes/index.js';
@@ -47,6 +47,133 @@ import { testServer } from '../cli/commands/test-server.js';
 import { getRoutingRecommendations } from '../cli/commands/routing.js';
 import { CacheLayer } from '../cache/index.js';
 import { ReliabilityGateway } from '../reliability/index.js';
+import {
+  setDiagMode,
+  getDiagMode,
+  renderDiagTrailer,
+  type DiagMode,
+  type DiagPayload,
+} from './diag-mode.js';
+import {
+  buildServerSummary,
+  buildCatalogInstructions,
+  buildServerCatalogDetail,
+  type ServerCatalogEntry,
+} from './catalog.js';
+import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+// ---------------------------------------------------------------------------
+// Result-budget helpers (exported so test/unit/result-budget.test.ts can
+// import them directly without standing up a full server instance).
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimate the token cost of an arbitrary value using the 3.8 chars/token
+ * heuristic (matches the constant in metrics-collector.ts and the audit doc).
+ */
+export function estimateResultTokens(value: unknown): number {
+  const json = JSON.stringify(value) ?? 'null';
+  return Math.ceil(json.length / 3.8);
+}
+
+/**
+ * Trim a result to fit within a token budget.
+ *
+ * - Arrays: binary-search for the largest prefix that fits.
+ * - Objects: drop keys from the end until the value fits.
+ * - Strings: clip at the char equivalent of the budget.
+ * - Primitives / other: serialise and clip the JSON string.
+ *
+ * Returns `{ wasTrimmed, result, meta? }`.
+ */
+export function trimResultToBudget(
+  value: unknown,
+  maxTokens: number,
+): { wasTrimmed: boolean; result: unknown; meta?: Record<string, unknown> } {
+  if (estimateResultTokens(value) <= maxTokens) {
+    return { wasTrimmed: false, result: value };
+  }
+
+  const originalBytes = JSON.stringify(value)?.length ?? 0;
+
+  if (Array.isArray(value)) {
+    // Binary search for largest prefix that fits
+    let lo = 0;
+    let hi = value.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      if (estimateResultTokens(value.slice(0, mid)) <= maxTokens) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return {
+      wasTrimmed: true,
+      result: value.slice(0, lo),
+      meta: {
+        to_tokens: maxTokens,
+        original_length: value.length,
+        trimmed_to: lo,
+        original_bytes: originalBytes,
+      },
+    };
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    let kept = keys.length;
+    while (kept > 0) {
+      const subset = Object.fromEntries(
+        keys.slice(0, kept).map((k) => [k, (value as Record<string, unknown>)[k]]),
+      );
+      if (estimateResultTokens(subset) <= maxTokens) {
+        return {
+          wasTrimmed: true,
+          result: subset,
+          meta: {
+            to_tokens: maxTokens,
+            original_keys: keys.length,
+            trimmed_to: kept,
+            original_bytes: originalBytes,
+          },
+        };
+      }
+      kept--;
+    }
+    return {
+      wasTrimmed: true,
+      result: {},
+      meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+    };
+  }
+
+  if (typeof value === 'string') {
+    const maxChars = Math.floor(maxTokens * 3.8);
+    if (value.length <= maxChars) {
+      return { wasTrimmed: false, result: value };
+    }
+    return {
+      wasTrimmed: true,
+      result: value.slice(0, maxChars) + '…[trimmed]',
+      meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+    };
+  }
+
+  // Fallback: serialise then clip
+  const json = JSON.stringify(value) ?? 'null';
+  const maxChars = Math.floor(maxTokens * 3.8);
+  return {
+    wasTrimmed: true,
+    result: json.slice(0, maxChars) + '…[trimmed]',
+    meta: { to_tokens: maxTokens, original_bytes: originalBytes },
+  };
+}
+
+/** Default server-side result token cap applied when max_result_tokens is not
+ *  explicitly set by the caller. Matches the audit recommendation of 2000
+ *  tokens for lean defaults (overridable via config in a future pass). */
+const DEFAULT_MAX_RESULT_TOKENS = 2000;
 
 /**
  * MCP Executor Server
@@ -142,12 +269,17 @@ export class MCPExecutorServer {
     // Initialise Deno executor
     this.executor = new DenoExecutor(config.sandbox);
 
-    // Initialise MCP Hub for real server connections
+    // Initialise MCP Hub for real server connections.
+    // Wire connect_timeout_ms from conductor config (default 10 s) so a single
+    // slow/hung child server cannot block conductor startup.
+    const conductorCfgForHub = loadConductorConfig();
+    const connectTimeoutMs = conductorCfgForHub?.connect_timeout_ms ?? 10000;
     this.hub = new MCPHub({
       servers: config.servers,
       autoReconnect: true,
       reconnectDelayMs: 5000,
       maxReconnectAttempts: 3,
+      connectionTimeoutMs: connectTimeoutMs,
     });
 
     // Initialise the ToolRegistry backed by the hub.
@@ -195,6 +327,9 @@ export class MCPExecutorServer {
   /**
    * Record metrics + shape the execute_code tool response. Extracted so the
    * progress/cancel wiring in the handler stays readable.
+   *
+   * @param wallMs  Optional outer wall time (ms) for the whole execute_code call,
+   *                used by the diag trailer. Falls back to executionTimeMs when absent.
    */
   private finaliseExecuteCodeResult(
     result: ExecutionResult,
@@ -202,11 +337,30 @@ export class MCPExecutorServer {
     servers: string[] | undefined,
     verbose: boolean | undefined,
     showTokenSavings: boolean | undefined,
-  ): { content: [{ type: 'text'; text: string }]; structuredContent: Record<string, unknown> } {
+    maxResultTokensParam?: number,
+    wallMs?: number,
+  ): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
+    // Apply result budget: use explicit param, or fall back to the lean default.
+    // Pass 0 to disable trimming entirely.
+    const budgetTokens =
+      maxResultTokensParam !== undefined
+        ? maxResultTokensParam
+        : DEFAULT_MAX_RESULT_TOKENS;
+
+    let resultValue = result.result;
+    let resultTrimmedMeta: Record<string, unknown> | undefined;
+    if (budgetTokens > 0 && resultValue !== undefined) {
+      const trimmed = trimResultToBudget(resultValue, budgetTokens);
+      if (trimmed.wasTrimmed) {
+        resultValue = trimmed.result;
+        resultTrimmedMeta = trimmed.meta;
+      }
+    }
+
     const executionMetrics = this.metricsCollector.recordExecution({
       executionId: result.executionId,
       code,
-      result: result.result,
+      result: resultValue,
       success: result.success,
       durationMs: result.metrics.executionTimeMs,
       toolCalls: result.metrics.toolCalls,
@@ -221,9 +375,13 @@ export class MCPExecutorServer {
 
     const output: Record<string, unknown> = {
       success: result.success,
-      result: result.result,
+      result: resultValue,
       error: result.error,
     };
+
+    if (resultTrimmedMeta !== undefined) {
+      output.result_trimmed = resultTrimmedMeta;
+    }
 
     if (verbose) {
       output.metrics = {
@@ -296,8 +454,30 @@ export class MCPExecutorServer {
       };
     }
 
+    const content: Array<{ type: 'text'; text: string }> = [
+      { type: 'text', text: JSON.stringify(output) },
+    ];
+
+    // Diag trailer: append as a separate content item when mode is on.
+    const diagMode = getDiagMode();
+    if (diagMode !== 'off') {
+      const resultJson = output.result !== undefined ? JSON.stringify(output.result) : '';
+      const diagPayload: DiagPayload = {
+        callType: 'execute_code',
+        toolName: 'execute_code',
+        wallMs: wallMs ?? result.metrics.executionTimeMs,
+        rawBytesIn: result.metrics.dataProcessedBytes,
+        outBytesToModel: resultJson.length,
+        scriptChars: code.length,
+      };
+      const trailer = renderDiagTrailer(diagPayload, diagMode);
+      if (trailer) {
+        content.push({ type: 'text', text: trailer });
+      }
+    }
+
     return {
-      content: [{ type: 'text', text: JSON.stringify(output) }],
+      content,
       structuredContent: output,
     };
   }
@@ -483,27 +663,143 @@ export class MCPExecutorServer {
   }
 
   /**
+   * Build catalog entries from live hub state (or mock servers for tests).
+   * Safe to call at any time — returns empty array before hub is initialised.
+   */
+  private buildCatalogEntries(): ServerCatalogEntry[] {
+    if (this.useMockServers) {
+      return Array.from(this.mockServers.entries()).map(([name, data]) =>
+        buildServerSummary(name, data.tools, 'connected')
+      );
+    }
+    return this.hub.listServers().map((s) => {
+      const tools = this.hub.getServerTools(s.name);
+      const status: ServerCatalogEntry['status'] =
+        s.status === 'connected'
+          ? 'connected'
+          : s.status === 'error'
+          ? 'failed'
+          : 'connecting';
+      return buildServerSummary(s.name, tools, status);
+    });
+  }
+
+  /**
+   * Build and set the catalog instructions on the underlying MCP Server.
+   *
+   * The instructions field is included in every initialize response, giving
+   * the client a compact description of all proxied backend servers without
+   * requiring an extra tool call.
+   *
+   * Note: relies on the SDK-private `_instructions` field on the underlying
+   * Server instance (SDK v1.29 — confirmed in
+   * node_modules/@modelcontextprotocol/sdk/dist/cjs/server/index.js:53,282).
+   * A test (catalog.test.ts) reads the field back to detect SDK renames.
+   */
+  private setCatalogInstructions(): void {
+    const conductorCfg = loadConductorConfig();
+    const budgetTokens = conductorCfg?.catalog?.instructions_budget_tokens ?? 1200;
+    const entries = this.buildCatalogEntries();
+    const instructions = buildCatalogInstructions(entries, budgetTokens);
+
+    // Set on the underlying Server (not McpServer) — McpServer exposes it as
+    // `this.server.server` (readonly public field). SDK v1.29 stores instructions
+    // on the private `_instructions` field (index.js:53); read back in initialize (index.js:282).
+    (this.server.server as unknown as Record<string, unknown>)['_instructions'] = instructions;
+
+    const approxTokens = Math.ceil(instructions.length / 4);
+    const serverCount = entries.length;
+    const toolCount = entries.reduce((s, e) => s + e.toolCount, 0);
+    logger.info(`Catalog: ${serverCount} servers, ${toolCount} tools, instructions ≈ ${approxTokens} tokens`);
+  }
+
+  /**
    * Register all 24 static MCP tools on the SDK server instance.
    * Called from the constructor — runs synchronously before `start()`.
    * Passthrough tools (dynamic, registry-backed) are registered later in
    * `start()` via `registerPassthroughTools()`, strictly before the SDK
    * transport connects (B6 ordering invariant).
+   *
+   * Also registers the `conductor://catalog` resource and
+   * `conductor://catalog/{server}` resource template here — registration
+   * MUST happen before transport.connect() (capability guard) and is safe
+   * to do pre-hub because read callbacks are lazy (called at request time).
    */
   private registerTools(): void {
+    // ── Catalog resources ──────────────────────────────────────────────────
+    // Register pre-connect (capabilities guard). Read callbacks run lazily
+    // at request time so they always reflect live hub state.
+
+    // Static resource: conductor://catalog — full catalog in markdown
+    this.server.registerResource(
+      'conductor-catalog',
+      'conductor://catalog',
+      {
+        title: 'Backend tool catalog',
+        description: 'Markdown catalog of all backend MCP servers proxied by mcp-conductor, with per-server tool lists.',
+        mimeType: 'text/markdown',
+      },
+      (_uri) => {
+        const entries = this.buildCatalogEntries();
+        const sections = entries.map((e) => {
+          const tools = this.useMockServers
+            ? (this.mockServers.get(e.name)?.tools ?? [])
+            : this.hub.getServerTools(e.name);
+          return buildServerCatalogDetail(e.name, tools);
+        });
+        const content =
+          `# mcp-conductor Backend Catalog\n\n` +
+          `${entries.length} server${entries.length !== 1 ? 's' : ''}, ` +
+          `${entries.reduce((s, e) => s + e.toolCount, 0)} tools total.\n\n` +
+          (sections.length > 0 ? sections.join('\n') : '_No servers connected._\n');
+        return {
+          contents: [{ uri: 'conductor://catalog', mimeType: 'text/markdown', text: content }],
+        };
+      },
+    );
+
+    // Template resource: conductor://catalog/{server} — per-server detail
+    this.server.registerResource(
+      'conductor-catalog-server',
+      new ResourceTemplate('conductor://catalog/{server}', {
+        list: () => {
+          const entries = this.buildCatalogEntries();
+          return {
+            resources: entries.map((e) => ({
+              uri: `conductor://catalog/${e.name}`,
+              name: `${e.name} tool catalog`,
+              description: e.summary,
+              mimeType: 'text/markdown',
+            })),
+          };
+        },
+      }),
+      {
+        title: 'Per-server tool catalog',
+        description: 'Markdown tool list for a specific backend MCP server.',
+        mimeType: 'text/markdown',
+      },
+      (uri, variables) => {
+        const rawServer = variables['server'];
+        const serverName = Array.isArray(rawServer)
+          ? (rawServer[0] ?? '')
+          : (rawServer ?? '');
+        const tools = this.useMockServers
+          ? (this.mockServers.get(serverName)?.tools ?? [])
+          : this.hub.getServerTools(serverName);
+        const content = buildServerCatalogDetail(serverName, tools);
+        return {
+          contents: [{ uri: uri.toString(), mimeType: 'text/markdown', text: content }],
+        };
+      },
+    );
+
     // Register execute_code tool
     this.server.registerTool(
       'execute_code',
       {
         title: 'Execute Code',
-        description: `Execute TypeScript/JavaScript code to perform MCP operations efficiently.
-
-**Token Savings:** 90-98% vs individual tool calls. Batch operations in a single execution.
-
-**API:** \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`
-
-**Example:** \`const files = await mcp.filesystem.call('list_directory', { path: '/src' }); return files;\`
-
-Use passthrough_call only for debugging - it has HIGH token cost.`,
+        description: `Run TypeScript/JavaScript in a Deno sandbox to call backend MCP tools (proxied by mcp-conductor) and return only the final result. **Use execute_code whenever a backend tool may return a large or multi-item result (issue/PR lists, search results, file contents, API or graph responses) — filter inside the script and return only what you need. For a single tiny known value, a direct call is fine.** Optionally call \`discover_tools\` first if you don't know the tool name, then write a script here that calls them via \`mcp.server('name').call('tool', params)\`. Saves 90–98% tokens vs individual passthrough calls. API: \`mcp.server('name').call('tool', params)\` | \`mcp.searchTools('query')\` | \`mcp.log('msg')\`. Use \`mcp.compact()\` / \`summarize()\` / \`budget()\` inside the script to shrink results further. Avoid \`passthrough_call\` except for raw debugging — it puts full request/response JSON into context (10–100× more tokens). Answer tersely from tool results rather than narrating tool use.`,
         annotations: {
           // execute_code proxies arbitrary code that can call any backend MCP
           // tool, so it inherits the most permissive capability surface.
@@ -527,6 +823,11 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             'For passthrough-mode tools the block carries a "not applicable" note. ' +
             'Can also be enabled globally via metrics.alwaysShowTokenSavings in ~/.mcp-conductor.json. ' +
             'Default: false.',
+          ),
+          max_result_tokens: z.number().optional().describe(
+            'Cap the result to approximately this many tokens. If the result exceeds the budget ' +
+            'it is progressively trimmed (arrays truncated, deep structures clipped) and ' +
+            'result_trimmed metadata is attached. Default: 2000. Set to 0 to disable trimming.',
           ),
         },
         outputSchema: {
@@ -555,7 +856,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
           }).optional(),
         },
       },
-      async ({ code, servers, timeout_ms, stream, verbose, show_token_savings }, extra) => {
+      async ({ code, servers, timeout_ms, stream, verbose, show_token_savings, max_result_tokens }, extra) => {
         const timeoutMs = Math.min(
           timeout_ms || this.config.execution.defaultTimeoutMs,
           this.config.execution.maxTimeoutMs
@@ -599,6 +900,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
         }
 
         let result: ExecutionResult | undefined;
+        const execWallStart = performance.now();
         try {
           result = await this.executor.execute(code, {
             timeoutMs,
@@ -608,7 +910,8 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
             signal: extra?.signal,
             executionId,
           });
-          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings);
+          const execWallMs = Math.round(performance.now() - execWallStart);
+          return this.finaliseExecuteCodeResult(result, code, servers, verbose, show_token_savings, max_result_tokens, execWallMs);
         } finally {
           if (execStream) {
             // Flip the stream out of `running` so StreamManager's normal
@@ -639,7 +942,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       'list_servers',
       {
         title: 'List Servers',
-        description: 'List all MCP servers connected through MCP Executor.',
+        description: 'List all backend MCP servers connected through mcp-conductor with connection status, tool counts, and routing mode. Use to confirm a specific server (e.g. ibkr, github, alphavantage, filesystem) is connected before calling its tools. Sister tool to `discover_tools` (which searches across all servers) and `diagnose_server` (which inspects one server\'s health in detail).',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -705,7 +1008,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       'discover_tools',
       {
         title: 'Discover Tools',
-        description: 'Search for available tools across all connected MCP servers.',
+        description: 'Search across all backend MCP servers proxied by mcp-conductor for available tools. Pass a query like "options chain" or "send email" and it returns matching tools with their server, name, description, and relevance score. Pair with `execute_code` to actually invoke the tool. Without this step the model only sees mcp-conductor\'s own meta-tools, not the hundreds of backend tools it proxies.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -801,7 +1104,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       'get_metrics',
       {
         title: 'Get Metrics',
-        description: 'Get detailed aggregated metrics for the current session including token savings, performance, and usage patterns.',
+        description: 'Get aggregated mcp-conductor session metrics: token savings (estimated passthrough cost vs actual execute_code cost), per-server call counts, wall-time percentiles, hot paths. Use to verify the token-savings model is delivering, or to identify slow backend servers.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -980,7 +1283,7 @@ Use passthrough_call only for debugging - it has HIGH token cost.`,
       'set_compare_mode',
       {
         title: 'Set Compare Mode',
-        description: `Toggle compare mode on/off. When ON, every tool response includes a 'compareStats' block showing measured speed + token data for both execute_code and passthrough routing.
+        description: `**mcp-conductor diagnostic mode.** Toggle compare mode on/off. When ON, every tool response includes a 'compareStats' block showing measured speed + token data for both execute_code and passthrough routing.
 
 For passthrough_call and auto-registered <server>__<tool> passthrough tools, this triggers REAL double-execution: the same call also runs via an execute_code wrapper. Backend tool calls fire TWICE while compare mode is on — destructive tools (delete/send/post/etc.) will execute twice. Use against read-only servers, or toggle off when not benchmarking.
 
@@ -1029,6 +1332,31 @@ Compare mode is process-local and resets to OFF on server restart.`,
       }
     );
 
+    // Register set_diag_mode tool — per-call telemetry trailer toggle.
+    this.server.registerTool(
+      'set_diag_mode',
+      {
+        title: 'Set Diag Mode',
+        description: 'Toggle mcp-conductor diagnostic mode on/off. When on, every execute_code and passthrough call result has a diag trailer appended showing wall time, byte counts, and estimated token savings. Modes: "off" (default, zero overhead), "summary" (one-line trailer, ~80 tokens/call), "verbose" (multi-line breakdown, ~250 tokens/call). Process-local; resets to "off" on restart. Use for testing token-savings claims and identifying slow backend servers.',
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        inputSchema: {
+          mode: z.enum(['off', 'summary', 'verbose']).describe('Diagnostic mode to set.'),
+        },
+      },
+      async ({ mode }) => {
+        const newMode = setDiagMode(mode as DiagMode);
+        logger.info('Diag mode set', { mode: newMode });
+        return {
+          content: [{ type: 'text', text: `diag mode: ${newMode}` }],
+        };
+      }
+    );
+
     // Register reload_servers tool
     this.server.registerTool(
       'reload_servers',
@@ -1051,6 +1379,20 @@ Compare mode is process-local and resets to OFF on server restart.`,
       async () => {
         const result = await this.reloadServers();
 
+        // Rebuild catalog instructions from the now-refreshed hub state so
+        // future initialize requests get an up-to-date catalog. Also notify
+        // connected clients that the tool and resource lists changed.
+        try {
+          this.setCatalogInstructions();
+          this.server.sendToolListChanged();
+          this.server.sendResourceListChanged();
+        } catch (err) {
+          // Must not fail the reload response — log and continue.
+          logger.warn('Failed to rebuild catalog or send list-changed after reload', {
+            error: String(err),
+          });
+        }
+
         const output = {
           added: result.added,
           removed: result.removed,
@@ -1070,7 +1412,7 @@ Compare mode is process-local and resets to OFF on server restart.`,
       'get_capabilities',
       {
         title: 'Get Capabilities',
-        description: 'Get detailed information about MCP Executor capabilities and configuration.',
+        description: 'Get detailed information about mcp-conductor capabilities, modes, and configuration. Returns the current operating mode (execution/passthrough/hybrid), connected server count, registered tool counts, and config file path.',
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -1172,17 +1514,19 @@ Returns estimated token usage and approach for each mode.`,
         const toolCalls = estimated_tool_calls || 5;
         const dataKb = estimated_data_kb || 10;
 
-        // Estimate tokens for passthrough mode
-        // Each tool call involves request + response in context
-        const tokensPerToolCall = 200; // Average tokens per tool call overhead
-        const tokensPerKb = 250; // Approximate tokens per KB of data
-        const passthroughTokens = (toolCalls * tokensPerToolCall) + (dataKb * tokensPerKb);
+        // Estimate tokens for passthrough mode using the same formula as
+        // computeTokenSavings() in metrics-collector.ts so estimates are consistent.
+        // passthroughTokens = (toolCalls × TOOL_CALL_OVERHEAD_TOKENS) + (dataKB × TOKENS_PER_KB)
+        const passthroughTokens = (toolCalls * TOOL_CALL_OVERHEAD_TOKENS) + (dataKb * TOKENS_PER_KB);
 
-        // Estimate tokens for execution mode
-        // Code + summarised result
-        const codeTokens = 100; // Typical code block
-        const resultTokens = 50; // Summarised result
-        const executionTokens = codeTokens + resultTokens;
+        // Estimate tokens for execution mode.
+        // We don't have real code/result bytes at estimation time, so use conservative
+        // proxies: ~50-char/token average code at CODE_CHARS_PER_TOKEN; result assumed
+        // ~10% of input data (filtered in-sandbox) at JSON_CHARS_PER_TOKEN.
+        const estimatedCodeChars = 300; // Typical short filtering script
+        const estimatedResultChars = Math.max(200, dataKb * 1024 * 0.1); // ~10% of raw data
+        const executionTokens = Math.ceil(estimatedCodeChars / CODE_CHARS_PER_TOKEN) +
+          Math.ceil(estimatedResultChars / JSON_CHARS_PER_TOKEN);
 
         const savingsPercent = Math.round(((passthroughTokens - executionTokens) / passthroughTokens) * 100);
 
@@ -1355,8 +1699,28 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
             output.compareStats = stats;
           }
 
+          const passthroughContent: Array<{ type: 'text'; text: string }> = [
+            { type: 'text', text: JSON.stringify(output) },
+          ];
+
+          // Diag trailer for passthrough_call.
+          const ptDiagMode = getDiagMode();
+          if (ptDiagMode !== 'off') {
+            const ptDiagPayload: DiagPayload = {
+              callType: 'passthrough',
+              toolName: `${server}.${tool}`,
+              wallMs: durationMs,
+              rawBytesIn: resultStr.length,
+              outBytesToModel: resultStr.length,
+            };
+            const ptTrailer = renderDiagTrailer(ptDiagPayload, ptDiagMode);
+            if (ptTrailer) {
+              passthroughContent.push({ type: 'text', text: ptTrailer });
+            }
+          }
+
           return {
-            content: [{ type: 'text', text: JSON.stringify(output) }],
+            content: passthroughContent,
             structuredContent: output,
           };
         } catch (error) {
@@ -2122,8 +2486,7 @@ Optionally strips the imported servers from their source configs.`,
       'test_server',
       {
         title: 'Test Server',
-        description: `Transiently connect to a named MCP server from conductor config, list its tools and measure latency.
-Does NOT persist the connection or register the server. The server must be present in ~/.mcp-conductor.json.`,
+        description: `Transiently connect to a named mcp-conductor backend server, list its tools, and measure handshake latency. Does NOT persist the connection or register the server. Use to verify a server in \`~/.mcp-conductor.json\` can boot and advertise tools before adding it to the live conductor. The server must already be present in the config.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -2163,8 +2526,7 @@ Does NOT persist the connection or register the server. The server must be prese
       'diagnose_server',
       {
         title: 'Diagnose Server',
-        description: `Diagnose a registered MCP server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state.
-Returns actionable information about why a server may be failing.`,
+        description: `Diagnose a single mcp-conductor backend server: process health, connection status, recent errors, reconnect attempts, last successful call, and registry state. Use when a server appears connected in \`list_servers\` but its tools aren't returning data, or when \`tools/list\` shows fewer tools than expected.`,
         annotations: {
           readOnlyHint: true,
           idempotentHint: true,
@@ -2359,6 +2721,12 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       // this._passthroughRegistrationComplete must be true before
       // server.connect(transport) is called below.
       this._passthroughRegistrationComplete = true;
+
+      // Build catalog instructions from live hub state and embed in the
+      // initialize response. Must happen after hub.initialise() so tool
+      // caches are populated, and before transport.connect() so the first
+      // client that sends initialize already sees the catalog.
+      this.setCatalogInstructions();
     } else {
       // When useMockServers is active there are no passthrough tools to
       // register, but we mark the flag so the transport-connect guard below

@@ -1,0 +1,310 @@
+{
+  "auditDate": "2026-06-12",
+  "generatedAt": "2026-06-12T08:52:00.000Z",
+  "sourceJson": "docs/benchmarks/workflow-results-2026-06-12.json",
+  "sourceScripts": [
+    "npm run benchmark:scale",
+    "vitest run test/benchmark/suites/mode-comparison.test.ts"
+  ],
+  "methodology": "Deterministic token-savings simulation. See docs/benchmarks/methodology.md.",
+  "formula": {
+    "passthroughTokens": "(toolCalls × 150) + (dataBytes / 1024 × 256)",
+    "executionTokens": "ceil(codeChars / 3.5) + ceil(resultJson.length / 3.8)",
+    "compressionPct": "(passthroughTokens - executionTokens) / passthroughTokens × 100"
+  },
+  "headline": {
+    "overallAvgCompressionPct": 95.67,
+    "peakCompressionPct": 99.5,
+    "worstCaseCompressionPct": 86.44,
+    "peakTokensSavedSingleCall": 216461,
+    "peakDataSizeKb": 800,
+    "peakSavingsUsdSonnet": 0.64938,
+    "modeComparisonSuiteDurationMs": 1940,
+    "modeComparisonTestsPassed": 12,
+    "modeComparisonTestsTotal": 12,
+    "p95WallTimeCriteriaMs": 500,
+    "p95WallTimePassed": true
+  },
+  "scaleScenarios": [
+    {
+      "class": "small",
+      "label": "Small (Solo Dev)",
+      "description": "1-5 tool calls, 5-15 KB total data",
+      "scenarios": [
+        {
+          "name": "github-issues-fetch",
+          "toolCalls": 1,
+          "dataKb": 3,
+          "passthroughTokens": 1025,
+          "executionTokens": 139,
+          "tokensSaved": 886,
+          "compressionPct": 86.44,
+          "sonnetSavingsUsd": 0.00266
+        },
+        {
+          "name": "filesystem-dir-listing",
+          "toolCalls": 1,
+          "dataKb": 4,
+          "passthroughTokens": 1275,
+          "executionTokens": 87,
+          "tokensSaved": 1188,
+          "compressionPct": 93.18,
+          "sonnetSavingsUsd": 0.00356
+        },
+        {
+          "name": "brave-search-single",
+          "toolCalls": 1,
+          "dataKb": 2,
+          "passthroughTokens": 775,
+          "executionTokens": 102,
+          "tokensSaved": 673,
+          "compressionPct": 86.84,
+          "sonnetSavingsUsd": 0.00202
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 88.82,
+        "avgTokensSaved": 916,
+        "totalTokensSaved": 2747,
+        "avgSonnetSavingsUsd": 0.0027
+      }
+    },
+    {
+      "class": "medium",
+      "label": "Medium (Active Team)",
+      "description": "5-25 tool calls, 15-100 KB total data",
+      "scenarios": [
+        {
+          "name": "sprint-dashboard",
+          "toolCalls": 3,
+          "dataKb": 18,
+          "passthroughTokens": 4950,
+          "executionTokens": 191,
+          "tokensSaved": 4759,
+          "compressionPct": 96.14,
+          "sonnetSavingsUsd": 0.01428
+        },
+        {
+          "name": "codebase-scan",
+          "toolCalls": 8,
+          "dataKb": 41,
+          "passthroughTokens": 11700,
+          "executionTokens": 238,
+          "tokensSaved": 11462,
+          "compressionPct": 97.97,
+          "sonnetSavingsUsd": 0.03439
+        },
+        {
+          "name": "parallel-web-research",
+          "toolCalls": 3,
+          "dataKb": 8,
+          "passthroughTokens": 2575,
+          "executionTokens": 188,
+          "tokensSaved": 2387,
+          "compressionPct": 92.7,
+          "sonnetSavingsUsd": 0.00716
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 95.6,
+        "avgTokensSaved": 6203,
+        "totalTokensSaved": 18608,
+        "avgSonnetSavingsUsd": 0.0186
+      }
+    },
+    {
+      "class": "large",
+      "label": "Large (Engineering Org)",
+      "description": "25-100 tool calls, 100-500 KB total data",
+      "scenarios": [
+        {
+          "name": "issue-triage-filetree",
+          "toolCalls": 12,
+          "dataKb": 109,
+          "passthroughTokens": 29800,
+          "executionTokens": 334,
+          "tokensSaved": 29466,
+          "compressionPct": 98.88,
+          "sonnetSavingsUsd": 0.0884
+        },
+        {
+          "name": "multi-repo-analysis",
+          "toolCalls": 25,
+          "dataKb": 145,
+          "passthroughTokens": 40750,
+          "executionTokens": 410,
+          "tokensSaved": 40340,
+          "compressionPct": 98.99,
+          "sonnetSavingsUsd": 0.12102
+        },
+        {
+          "name": "parallel-search-github",
+          "toolCalls": 22,
+          "dataKb": 88,
+          "passthroughTokens": 25700,
+          "executionTokens": 329,
+          "tokensSaved": 25371,
+          "compressionPct": 98.72,
+          "sonnetSavingsUsd": 0.07611
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 98.86,
+        "avgTokensSaved": 31726,
+        "totalTokensSaved": 95177,
+        "avgSonnetSavingsUsd": 0.0952
+      }
+    },
+    {
+      "class": "enterprise",
+      "label": "Enterprise (CI/CD Automation)",
+      "description": "100-500 tool calls, 500 KB - 2 MB total data",
+      "scenarios": [
+        {
+          "name": "backlog-scan-500",
+          "toolCalls": 52,
+          "dataKb": 375,
+          "passthroughTokens": 103800,
+          "executionTokens": 694,
+          "tokensSaved": 103106,
+          "compressionPct": 99.33,
+          "sonnetSavingsUsd": 0.30932
+        },
+        {
+          "name": "dependency-audit-monorepo",
+          "toolCalls": 64,
+          "dataKb": 549,
+          "passthroughTokens": 150100,
+          "executionTokens": 899,
+          "tokensSaved": 149201,
+          "compressionPct": 99.4,
+          "sonnetSavingsUsd": 0.4476
+        },
+        {
+          "name": "daily-digest-5-repos",
+          "toolCalls": 85,
+          "dataKb": 800,
+          "passthroughTokens": 217550,
+          "executionTokens": 1089,
+          "tokensSaved": 216461,
+          "compressionPct": 99.5,
+          "sonnetSavingsUsd": 0.64938
+        }
+      ],
+      "summary": {
+        "avgCompressionPct": 99.41,
+        "avgTokensSaved": 156256,
+        "totalTokensSaved": 468768,
+        "avgSonnetSavingsUsd": 0.4688
+      }
+    }
+  ],
+  "workflowScenarios": [
+    {
+      "label": "Morning Standup",
+      "quick": { "passthroughTokens": 4590, "executionTokens": 140, "compressionPct": 96.95, "tokensSaved": 4450 },
+      "deep":  { "passthroughTokens": 8880, "executionTokens": 214, "compressionPct": 97.59, "tokensSaved": 8666 },
+      "avgCompressionPct": 97.27,
+      "deepSonnetSavingsUsd": 0.026
+    },
+    {
+      "label": "Code Review",
+      "quick": { "passthroughTokens": 9860, "executionTokens": 225, "compressionPct": 97.72, "tokensSaved": 9635 },
+      "deep":  { "passthroughTokens": 18140, "executionTokens": 309, "compressionPct": 98.30, "tokensSaved": 17831 },
+      "avgCompressionPct": 98.01,
+      "deepSonnetSavingsUsd": 0.053
+    },
+    {
+      "label": "Bug Investigation",
+      "quick": { "passthroughTokens": 7150, "executionTokens": 208, "compressionPct": 97.09, "tokensSaved": 6942 },
+      "deep":  { "passthroughTokens": 12720, "executionTokens": 309, "compressionPct": 97.57, "tokensSaved": 12411 },
+      "avgCompressionPct": 97.33,
+      "deepSonnetSavingsUsd": 0.037
+    },
+    {
+      "label": "Dependency Check",
+      "quick": { "passthroughTokens": 5208, "executionTokens": 155, "compressionPct": 97.02, "tokensSaved": 5053 },
+      "deep":  { "passthroughTokens": 9860, "executionTokens": 237, "compressionPct": 97.60, "tokensSaved": 9623 },
+      "avgCompressionPct": 97.31,
+      "deepSonnetSavingsUsd": 0.029
+    },
+    {
+      "label": "Research Synthesis",
+      "quick": { "passthroughTokens": 2498, "executionTokens": 167, "compressionPct": 93.31, "tokensSaved": 2331 },
+      "deep":  { "passthroughTokens": 3822, "executionTokens": 248, "compressionPct": 93.51, "tokensSaved": 3574 },
+      "avgCompressionPct": 93.41,
+      "deepSonnetSavingsUsd": 0.011,
+      "note": "Worst-case workflow: small payloads expose fixed code-overhead ratio"
+    },
+    {
+      "label": "Project Context Load",
+      "quick": { "passthroughTokens": 11290, "executionTokens": 216, "compressionPct": 98.09, "tokensSaved": 11074 },
+      "deep":  { "passthroughTokens": 21150, "executionTokens": 320, "compressionPct": 98.49, "tokensSaved": 20830 },
+      "avgCompressionPct": 98.29,
+      "deepSonnetSavingsUsd": 0.062
+    },
+    {
+      "label": "Release Prep",
+      "quick": { "passthroughTokens": 7150, "executionTokens": 157, "compressionPct": 97.80, "tokensSaved": 6993 },
+      "deep":  { "passthroughTokens": 14150, "executionTokens": 262, "compressionPct": 98.15, "tokensSaved": 13888 },
+      "avgCompressionPct": 97.98,
+      "deepSonnetSavingsUsd": 0.042
+    }
+  ],
+  "workflowOverallAvgCompressionPct": 97.1,
+  "claudeDesktopSessions": [
+    {
+      "profile": "light",
+      "label": "Light User (3 workflows)",
+      "totalPassthroughTokens": 49740,
+      "totalExecutionTokens": 10832,
+      "workflowCompressionPct": 97.91,
+      "sessionsPerContextWindowPassthrough": 5,
+      "sessionsPerContextWindowExecution": 240,
+      "capacityMultiplier": 48,
+      "monthlySavingsUsd": 10.51
+    },
+    {
+      "profile": "power",
+      "label": "Power User (8 workflows)",
+      "totalPassthroughTokens": 126862,
+      "totalExecutionTokens": 22208,
+      "workflowCompressionPct": 97.93,
+      "sessionsPerContextWindowPassthrough": 1,
+      "sessionsPerContextWindowExecution": 90,
+      "capacityMultiplier": 90,
+      "monthlySavingsUsd": 56.51
+    },
+    {
+      "profile": "heavy",
+      "label": "Heavy Automation (20 workflows)",
+      "totalPassthroughTokens": 281866,
+      "totalExecutionTokens": 35496,
+      "workflowCompressionPct": 97.82,
+      "sessionsPerContextWindowPassthrough": 0,
+      "sessionsPerContextWindowExecution": 36,
+      "capacityMultiplier": null,
+      "note": "Passthrough overflows 200K context in a single session",
+      "monthlySavingsUsd": 266.08
+    }
+  ],
+  "modeComparisonHarness": {
+    "testFile": "test/benchmark/suites/mode-comparison.test.ts",
+    "passed": 12,
+    "total": 12,
+    "durationMs": 1940,
+    "p95CriteriaMs": 500,
+    "p99CriteriaMs": 1000,
+    "p95Passed": true,
+    "regressionDetectionMs": 100,
+    "crossServerAggregationMs": 329,
+    "worstSingleTestMs": 708
+  },
+  "wallTimeSummary": {
+    "totalCapSec": 600,
+    "consumedSec": 102,
+    "benchmarkScaleSec": 13,
+    "modeComparisonSec": 2,
+    "jsonParseAndReportWriteSec": 87
+  }
+}

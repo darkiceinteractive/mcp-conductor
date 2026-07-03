@@ -1,0 +1,60 @@
+{
+  "suite": "S3-bridge-throughput-ceiling",
+  "timestamp": "2026-06-12T04:17:12.899Z",
+  "environment": {
+    "stress": false,
+    "node": "v26.0.0",
+    "platform": "darwin"
+  },
+  "config": {
+    "startRps": 100,
+    "stepRps": 50,
+    "maxRps": 300,
+    "windowSec": 1,
+    "errorCliffThreshold": 0.05,
+    "mockBridgeCapacityRps": 200
+  },
+  "ceilingRps": 155.3450905747319,
+  "ramp": [
+    {
+      "targetRps": 100,
+      "actualRps": 58.092094413886,
+      "errorRate": 0,
+      "successCount": 100,
+      "failureCount": 0,
+      "windowMs": 1721.4046249999997
+    },
+    {
+      "targetRps": 150,
+      "actualRps": 117.96418977291478,
+      "errorRate": 0,
+      "successCount": 150,
+      "failureCount": 0,
+      "windowMs": 1271.572333
+    },
+    {
+      "targetRps": 200,
+      "actualRps": 136.66544180264444,
+      "errorRate": 0,
+      "successCount": 200,
+      "failureCount": 0,
+      "windowMs": 1463.4277500000007
+    },
+    {
+      "targetRps": 250,
+      "actualRps": 155.3450905747319,
+      "errorRate": 0,
+      "successCount": 250,
+      "failureCount": 0,
+      "windowMs": 1609.3202499999989
+    },
+    {
+      "targetRps": 300,
+      "actualRps": 199.13061234073797,
+      "errorRate": 0.12666666666666668,
+      "successCount": 262,
+      "failureCount": 38,
+      "windowMs": 1506.5488750000004
+    }
+  ]
+}

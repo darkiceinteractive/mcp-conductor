@@ -1,0 +1,68 @@
+{
+  "date": "2026-05-07",
+  "results": [
+    {
+      "scenario": "write-storm-10K",
+      "concurrency": 10000,
+      "durationMs": 5.5,
+      "bytesUsed": 517780,
+      "maxMemoryBytes": 10485760,
+      "evictions": 0,
+      "errors": 0
+    },
+    {
+      "scenario": "read-amplification-100",
+      "concurrency": 100,
+      "durationMs": 2.3,
+      "bytesUsed": 34,
+      "maxMemoryBytes": 10485760,
+      "evictions": 0,
+      "errors": 0
+    },
+    {
+      "scenario": "mixed-50r-50w",
+      "concurrency": 5000,
+      "durationMs": 1.6,
+      "bytesUsed": 177560,
+      "maxMemoryBytes": 10485760,
+      "evictions": 0,
+      "errors": 0
+    },
+    {
+      "scenario": "mixed-90r-10w",
+      "concurrency": 5000,
+      "durationMs": 1,
+      "bytesUsed": 74560,
+      "maxMemoryBytes": 10485760,
+      "evictions": 0,
+      "errors": 0
+    },
+    {
+      "scenario": "mixed-99r-1w",
+      "concurrency": 5000,
+      "durationMs": 1.3,
+      "bytesUsed": 52160,
+      "maxMemoryBytes": 10485760,
+      "evictions": 0,
+      "errors": 0
+    },
+    {
+      "scenario": "eviction-pressure-recently-used",
+      "concurrency": 1000,
+      "durationMs": 0,
+      "bytesUsed": 2000,
+      "maxMemoryBytes": 2048,
+      "evictions": 961,
+      "errors": 0
+    },
+    {
+      "scenario": "concurrent-mixed-10K-no-throw",
+      "concurrency": 10000,
+      "durationMs": 2.9,
+      "bytesUsed": 8684,
+      "maxMemoryBytes": 10485760,
+      "evictions": 3167,
+      "errors": 0
+    }
+  ]
+}

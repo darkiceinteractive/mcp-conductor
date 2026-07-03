@@ -70,7 +70,10 @@ const DEFAULT_HUB_CONFIG: Required<HubConfig> = {
   claudeConfigPath: '',
   conductorConfigPath: '',
   servers: { allowList: [], denyList: [] },
-  connectionTimeoutMs: 30000,
+  // Per-child connect timeout reduced to 10 s (was 30 s) so a single slow
+  // or hung child server cannot block conductor startup. Override via
+  // connect_timeout_ms in ~/.mcp-conductor.json or the HubConfig option.
+  connectionTimeoutMs: 10000,
   autoReconnect: true,
   reconnectDelayMs: 5000,
   maxReconnectAttempts: 3,
@@ -307,11 +310,15 @@ export class MCPHub extends EventEmitter {
         }
       };
 
-      // Connect with timeout
+      // Connect with per-child timeout so one slow server can't block startup.
+      // On timeout the connection is marked 'failed' and startup continues.
+      const timeoutMs = this.config.connectionTimeoutMs;
       await Promise.race([
         client.connect(transport),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timeout')), this.config.connectionTimeoutMs)
+        new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            reject(new Error(`Server '${name}' handshake timed out after ${timeoutMs}ms — continuing without it`));
+          }, timeoutMs)
         ),
       ]);
 
@@ -330,7 +337,12 @@ export class MCPHub extends EventEmitter {
       return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to connect to server: ${name}`, { error: errorMessage });
+      // Distinguish timeout (warn) from other failures (error) for cleaner logs
+      if (errorMessage.includes('timed out after')) {
+        logger.warn(errorMessage, { server: name });
+      } else {
+        logger.error(`Failed to connect to server: ${name}`, { error: errorMessage });
+      }
 
       const connection = this.connections.get(name);
       if (connection) {

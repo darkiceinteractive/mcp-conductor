@@ -23,7 +23,58 @@
 import * as z from 'zod';
 import { logger } from '../utils/index.js';
 import type { ToolRegistry } from '../registry/registry.js';
+import type { JsonSchema } from '../registry/index.js';
 import type { MCPHub } from '../hub/mcp-hub.js';
+import { getDiagMode, renderDiagTrailer, type DiagPayload } from './diag-mode.js';
+
+/**
+ * Coerce string-typed param values to their declared JSON Schema types before
+ * forwarding to a backend MCP server.
+ *
+ * F9 (finding 29): the brave-search backend declares `count` and `offset` as
+ * `integer` but Claude sometimes passes them as strings via JSON serialisation
+ * (e.g. `count: "5"`). The backend's Zod schema (`z.int()`) rejects strings
+ * with `MCP error -32602: expected number, received string`.
+ *
+ * We walk `schema.properties` and, for each param whose declared type is
+ * `"number"`, `"integer"`, or `"boolean"`, attempt to coerce a string value
+ * to that type. Non-string values and params without a type declaration are
+ * passed through unchanged.
+ *
+ * This function is intentionally narrow: it only touches string values where
+ * the schema declares a numeric or boolean type. It does not recurse into
+ * nested objects or arrays (not needed for known affected tools).
+ */
+export function coerceParamsToSchema(
+  params: Record<string, unknown>,
+  schema: JsonSchema,
+): Record<string, unknown> {
+  const properties = schema.properties;
+  if (!properties) return params;
+
+  const coerced: Record<string, unknown> = { ...params };
+
+  for (const [key, propSchema] of Object.entries(properties)) {
+    const value = coerced[key];
+    if (typeof value !== 'string') continue; // only coerce strings
+
+    const declaredType = Array.isArray(propSchema.type)
+      ? propSchema.type[0]
+      : propSchema.type;
+
+    if (declaredType === 'number' || declaredType === 'integer') {
+      const n = Number(value);
+      if (!Number.isNaN(n)) {
+        coerced[key] = n;
+      }
+    } else if (declaredType === 'boolean') {
+      if (value === 'true') coerced[key] = true;
+      else if (value === 'false') coerced[key] = false;
+    }
+  }
+
+  return coerced;
+}
 
 /**
  * Minimal interface of McpServer that the registrar needs.
@@ -45,7 +96,7 @@ export interface McpServerLike {
       inputSchema: Record<string, unknown>;
     },
     handler: (params: Record<string, unknown>) => Promise<{
-      content: [{ type: 'text'; text: string }];
+      content: Array<{ type: 'text'; text: string }>;
       structuredContent?: Record<string, unknown>;
     }>
   ): void;
@@ -192,6 +243,7 @@ export const STATIC_TOOL_NAMES: ReadonlySet<string> = new Set([
   'diagnose_server',
   'recommend_routing',
   'export_to_claude',
+  'set_diag_mode',
 ]);
 
 /**
@@ -267,6 +319,8 @@ export function registerPassthroughTools(
     const toolServer = tool.server;
     const toolName = tool.name;
     const toolDescription = tool.description;
+    // Capture the upstream inputSchema for param coercion (F9 fix).
+    const toolInputSchema = tool.inputSchema;
 
     mcpServer.registerTool(
       composedName,
@@ -279,8 +333,13 @@ export function registerPassthroughTools(
       async (params: Record<string, unknown>) => {
         logger.debug(`Passthrough call: ${toolServer}.${toolName}`, { params });
 
+        // F9 (finding 29): coerce string values to their declared schema types
+        // before forwarding. brave-search backend requires count/offset as
+        // integers; the model sometimes emits them as strings.
+        const forwardParams = coerceParamsToSchema(params, toolInputSchema);
+
         const start = Date.now();
-        const result = await mcpHub.callTool(toolServer, toolName, params);
+        const result = await mcpHub.callTool(toolServer, toolName, forwardParams);
         const passthroughDurationMs = Date.now() - start;
 
         const resultStr =
@@ -296,7 +355,7 @@ export function registerPassthroughTools(
             structured.compareStats = await compareHook.buildCompareStats(
               toolServer,
               toolName,
-              params,
+              forwardParams,
               passthroughDurationMs,
               resultStr.length,
             );
@@ -309,8 +368,28 @@ export function registerPassthroughTools(
           }
         }
 
+        const ptContent: Array<{ type: 'text'; text: string }> = [
+          { type: 'text' as const, text: resultStr },
+        ];
+
+        // Diag trailer for auto-registered passthrough tools.
+        const ptDiagMode = getDiagMode();
+        if (ptDiagMode !== 'off') {
+          const ptDiagPayload: DiagPayload = {
+            callType: 'passthrough_tool',
+            toolName: `${toolServer}.${toolName}`,
+            wallMs: passthroughDurationMs,
+            rawBytesIn: resultStr.length,
+            outBytesToModel: resultStr.length,
+          };
+          const ptTrailer = renderDiagTrailer(ptDiagPayload, ptDiagMode);
+          if (ptTrailer) {
+            ptContent.push({ type: 'text' as const, text: ptTrailer });
+          }
+        }
+
         return {
-          content: [{ type: 'text' as const, text: resultStr }],
+          content: ptContent,
           structuredContent: structured,
         };
       }

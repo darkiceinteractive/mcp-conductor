@@ -126,6 +126,18 @@ export interface ConductorServerConfig {
 }
 
 /**
+ * Catalog presence configuration — controls the handshake `instructions` budget.
+ */
+export interface CatalogConfig {
+  /**
+   * Token budget for the catalog text embedded in the MCP initialize `instructions`
+   * field. Catalog is trimmed (tool lists dropped, then small servers collapsed)
+   * if the full text would exceed this. Default: 1200.
+   */
+  instructions_budget_tokens?: number;
+}
+
+/**
  * MCP Conductor's own configuration file (~/.mcp-conductor.json)
  * Used in exclusive mode to store server configurations separately from Claude's config.
  */
@@ -134,6 +146,17 @@ export interface ConductorConfig {
   exclusive: boolean;
   /** MCP servers that conductor will connect to internally */
   servers: Record<string, ConductorServerConfig>;
+  /**
+   * Maximum time to wait for an individual child server's stdio handshake
+   * before marking it as failed and continuing startup. Default: 10000 ms.
+   * Prevents a single slow/hung server from blocking the whole conductor.
+   */
+  connect_timeout_ms?: number;
+  /**
+   * Catalog presence layer configuration. Controls the `instructions` field
+   * included in the MCP initialize response.
+   */
+  catalog?: CatalogConfig;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
