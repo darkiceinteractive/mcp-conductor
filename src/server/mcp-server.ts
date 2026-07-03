@@ -217,6 +217,11 @@ export class MCPExecutorServer {
    */
   _passthroughRegistrationComplete = false;
 
+  // Lazy initialization support
+  private lazyHubInitializer: LazyHubInitializer | null = null;
+  private cachedCatalogServers: CachedServerCatalog[] | null = null;
+  private usedCacheForInitialization: boolean = false;
+
   constructor(config: MCPExecutorConfig, options?: { useMockServers?: boolean }) {
     this.config = config;
     this.useMockServers = options?.useMockServers ?? false;
@@ -2722,7 +2727,31 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
     // Initialise the MCP Hub (connect to real servers)
     if (!this.useMockServers) {
       logger.info('Initialising MCP Hub...');
-      await this.hub.initialise();
+      // Check lazy_connect config and try to use cached catalog
+      const conductorCfg_lazy = loadConductorConfig();
+      const lazyConnectEnabled = conductorCfg_lazy?.catalog?.lazy_connect !== false;
+      
+      let usedCache_local = false;
+      if (lazyConnectEnabled) {
+        const configJson_local = JSON.stringify(this.config.servers || {});
+        const cachedCatalog_local = await readCatalogCache(configJson_local);
+        if (cachedCatalog_local) {
+          logger.info('Using cached catalog for initialization', {
+            servers: cachedCatalog_local.servers.length,
+          });
+          this.cachedCatalogServers = cachedCatalog_local.servers;
+          this.usedCacheForInitialization = true;
+          this.setCatalogInstructions();
+          this._passthroughRegistrationComplete = true;
+          this.lazyHubInitializer = new LazyHubInitializer(this.hub);
+          usedCache_local = true;
+        }
+      }
+      
+      if (!usedCache_local) {
+        logger.info('Initializing MCP Hub...');
+
+      }
       const stats = this.hub.getStats();
       logger.info('MCP Hub initialised', {
         connected: stats.connected,

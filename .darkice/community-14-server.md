@@ -1,8 +1,8 @@
 # Community 14 — Server
-6 files · 38725 tokens · 2% of project
+6 files · 39031 tokens · 2% of project
 
 ## Files
-- `src/server/mcp-server.ts` — (29379 tokens)
+- `src/server/mcp-server.ts` — (29685 tokens)
 - `src/server/passthrough-registrar.ts` — (3778 tokens)
 - `src/server/catalog.ts` — (3129 tokens)
 - `src/server/diag-mode.ts` — (1958 tokens)
