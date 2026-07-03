@@ -9,8 +9,7 @@
 - `src/utils/tokenize.ts` (used by 1 files)
 - `src/utils/index.ts` (used by 1 files)
 - `src/reliability/errors.ts` (used by 1 files)
-- `src/config/schema.ts` (used by 1 files)
 - `src/config/loader.ts` (used by 1 files)
 
 ## Imports out of this community
-_(none)_
+- `src/server/passthrough-registrar.ts` (importing 1 files)

@@ -1,8 +1,8 @@
 # Project Index — mcp-executor-darkice
-Generated: 2026-06-18T08:36:24.267171+00:00 | Branch: none | Files: 718 | Est. tokens: 2,394,045
+Generated: 2026-07-03T03:05:16.909506+00:00 | Branch: none | Files: 719 | Est. tokens: 2,374,203
 
 ## Languages
-Other: 384 files (53%) · Typescript: 325 files (45%) · Javascript: 7 files (1%) · Tsx: 2 files (0%)
+Other: 384 files (53%) · Typescript: 326 files (45%) · Javascript: 7 files (1%) · Tsx: 2 files (0%)
 
 ## Entry Points (God Nodes)
 - `src/utils/index.ts` — (109 tokens)
@@ -12,7 +12,7 @@ Other: 384 files (53%) · Typescript: 325 files (45%) · Javascript: 7 files (1%
 - `src/cli/clients/adapter.ts` — (1132 tokens)
 
 ## Communities
-### Community 0 — Core (604 files)
+### Community 0 — Core (606 files)
 Key files: `Archive.zip`, `docs-site/package-lock.json`, `package-lock.json`
 See: .darkice/community-0-core.md
 
@@ -32,8 +32,8 @@ See: .darkice/community-3-cache.md
 Key files: `src/cli/wizard/setup.ts`, `src/cli/clients/registry.ts`, `src/cli/commands/doctor.ts`
 See: .darkice/community-4-cli.md
 
-### Community 5 — Config (4 files)
-Key files: `src/config/loader.ts`, `src/config/schema.ts`, `src/config/defaults.ts`
+### Community 5 — Config (3 files)
+Key files: `src/config/loader.ts`, `src/config/defaults.ts`, `src/config/index.ts`
 See: .darkice/community-5-config.md
 
 ### Community 6 — Daemon (8 files)
@@ -69,7 +69,7 @@ Key files: `src/runtime/executor.ts`, `src/runtime/pool/worker.ts`, `src/runtime
 See: .darkice/community-13-runtime.md
 
 ### Community 14 — Server (4 files)
-Key files: `src/server/mcp-server.ts`, `src/server/catalog.ts`, `src/server/diag-mode.ts`
+Key files: `src/server/passthrough-registrar.ts`, `src/server/catalog.ts`, `src/server/diag-mode.ts`
 See: .darkice/community-14-server.md
 
 ### Community 15 — Skills (2 files)
@@ -90,5 +90,10 @@ See: .darkice/community-18-watcher.md
 
 ## Recent Changes
 Files modified in last 24h:
-- `test/unit/catalog.test.ts` — 0m ago
-- `docs/findings/2026-06-12-perf-audit/README.md` — 0m ago
+- `test/unit/tool-annotations.test.ts` — 3m ago
+- `test/unit/passthrough-registrar.test.ts` — 3m ago
+- `src/server/passthrough-registrar.ts` — 3m ago
+- `src/bridge/http-server.ts` — 3m ago
+- `test/unit/diag-mode.test.ts` — 3m ago
+- `test/unit/catalog.test.ts` — 3m ago
+- `src/server/catalog.ts` — 3m ago

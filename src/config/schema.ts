@@ -14,6 +14,7 @@ export interface ExecutionConfig {
   defaultTimeoutMs: number;
   maxTimeoutMs: number;
   streamingEnabled: boolean;
+  resultTokensBudget?: number;
 }
 
 export interface SandboxConfig {

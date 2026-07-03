@@ -1,5 +1,5 @@
 # Community 4 — Cli
-22 files · 35887 tokens · 1% of project
+22 files · 35887 tokens · 2% of project
 
 ## Files
 - `src/cli/wizard/setup.ts` — (2998 tokens)
