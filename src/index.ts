@@ -98,7 +98,11 @@ async function main(): Promise<void> {
     // MCP tool definitions. Populated here so it is ready before any tool
     // call is dispatched. The hub satisfies the BackendBridge interface.
     const registry = new ToolRegistry({ bridge: server.getHub() });
-    const catalogSnapshot = await registry.refresh();
+    // Guard: skip refresh on warm cache path (hub not yet initialized)
+    // Lazy init will populate registry on first tool call
+    const catalogSnapshot = server.hasUsedCacheForInitialization()
+      ? []
+      : await registry.refresh();
     logger.info('ToolRegistry initialised', { toolCount: catalogSnapshot.length });
 
     // Orphan watchdog: if the MCP client that spawned us dies, our

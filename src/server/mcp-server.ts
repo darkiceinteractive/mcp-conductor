@@ -2726,63 +2726,45 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
   async start(): Promise<void> {
     // Initialise the MCP Hub (connect to real servers)
     if (!this.useMockServers) {
-      // Try lazy initialization if cache available
-      const conductorCfgLazy = loadConductorConfig();
-      const lazyConnect = conductorCfgLazy?.catalog?.lazy_connect !== false;
+      // Lazy-connect: try cached catalog first (warm path), fall back to hub initialization (cold path)
+      const conductorCfg = loadConductorConfig();
+      const lazyConnectEnabled = conductorCfg?.catalog?.lazy_connect !== false;
+      const configJson = JSON.stringify(this.config.servers || {});
       let usedCache = false;
 
-      if (lazyConnect) {
-        const cfgJson = JSON.stringify(this.config.servers || {});
-        const cached = await readCatalogCache(cfgJson);
-        if (cached) {
-          logger.info("Using cached catalog", { servers: cached.servers.length });
+      if (lazyConnectEnabled) {
+        const cached = await readCatalogCache(configJson);
+        if (cached && cached.servers.length > 0) {
+          // WARM PATH: use cached catalog, defer hub initialization
+          logger.info('Using cached catalog for initialization', {
+            servers: cached.servers.length,
+          });
           this.cachedCatalogServers = cached.servers;
           this.usedCacheForInitialization = true;
           this.setCatalogInstructions();
-          this._passthroughRegistrationComplete = true;
           this.lazyHubInitializer = new LazyHubInitializer(this.hub);
           usedCache = true;
-        }
-      }
-      if (!usedCache) {
-      logger.info('Initialising MCP Hub...');
-      // Check lazy_connect config and try to use cached catalog
-      const conductorCfg_lazy = loadConductorConfig();
-      const lazyConnectEnabled = conductorCfg_lazy?.catalog?.lazy_connect !== false;
-      
-      let usedCache = false;
-      if (lazyConnectEnabled) {
-        const configJson_local = JSON.stringify(this.config.servers || {});
-        const cachedCatalog_local = await readCatalogCache(configJson_local);
-        if (cachedCatalog_local) {
-          logger.info('Using cached catalog for initialization', {
-            servers: cachedCatalog_local.servers.length,
-          });
-          this.cachedCatalogServers = cachedCatalog_local.servers;
-          this.usedCacheForInitialization = true;
-          this.setCatalogInstructions();
-      }  // end if (!usedCache)
-      await this.writeCatalogToCacheNow();
           this._passthroughRegistrationComplete = true;
-          this.lazyHubInitializer = new LazyHubInitializer(this.hub);
-          usedCache = true;
         }
       }
-      
+
       if (!usedCache) {
+        // COLD PATH: initialize hub and populate registry
         logger.info('Initializing MCP Hub...');
-
+        await this.hub.initialise();
+        const stats = this.hub.getStats();
+        logger.info('MCP Hub initialised', {
+          connected: stats.connected,
+          total: stats.total,
+        });
+        await this.registry.refresh();
+        await this.writeCatalogToCacheNow();
       }
-      const stats = this.hub.getStats();
-      logger.info('MCP Hub initialised', {
-        connected: stats.connected,
-        total: stats.total,
-      });
 
-      // Populate the registry from the now-connected hub, apply built-in
+      // Populate the registry from the now-connected hub (if cold path), apply built-in
       // routing recommendations for known servers, then register all
       // `routing: "passthrough"` tools as first-class MCP tools.
-      await this.registry.refresh();
+      if (!usedCache) {
       applyBuiltInRecommendations(
         this.registry.getAllTools(),
         (server, name, meta) => this.registry.annotate(server, name, meta)
@@ -2828,6 +2810,7 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       // caches are populated, and before transport.connect() so the first
       // client that sends initialize already sees the catalog.
       this.setCatalogInstructions();
+      }
     } else {
           // Ensure hub initialized before tool calls (lazy init support)
           if (this.lazyHubInitializer && !this.lazyHubInitializer.isInitialized()) {
@@ -3084,8 +3067,16 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
   /**
    * Get the MCP Hub instance (for advanced usage)
    */
-  getHub(): MCPHub {
+    getHub(): MCPHub {
     return this.hub;
+  }
+
+  /**
+   * Check if warm cache was used for initialization (deferred hub setup).
+   * Used by index.ts to avoid redundant registry.refresh() on uninitialized hub.
+   */
+  hasUsedCacheForInitialization(): boolean {
+    return this.usedCacheForInitialization;
   }
 
   /**
