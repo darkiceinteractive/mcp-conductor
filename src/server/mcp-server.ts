@@ -16,7 +16,7 @@ import {
   applyBuiltInRecommendations,
   applyPerServerRouting,
 } from '../registry/built-in-recommendations.js';
-import { registerPassthroughTools } from './passthrough-registrar.js';
+import { registerPassthroughTools, coerceParamsToSchema } from './passthrough-registrar.js';
 import { SkillsEngine, type SkillsEngineConfig } from '../skills/index.js';
 import { ModeHandler, type ModeMetrics } from '../modes/index.js';
 import { MetricsCollector, computeTokenSavings, type TokenSavings, TOOL_CALL_OVERHEAD_TOKENS, TOKENS_PER_KB, CODE_CHARS_PER_TOKEN, JSON_CHARS_PER_TOKEN } from '../metrics/index.js';
@@ -1045,10 +1045,11 @@ export class MCPExecutorServer {
 
               if (!query || nameMatch || descMatch) {
                 const relevance = nameMatch ? 1.0 : descMatch ? 0.7 : 0.5;
+                const desc = tool.description;
                 results.push({
                   server: serverName,
                   tool: tool.name,
-                  description: tool.description,
+                  description: desc.length > 140 ? desc.slice(0, 140) + '…' : desc,
                   relevance,
                 });
               }
@@ -1068,10 +1069,11 @@ export class MCPExecutorServer {
 
               if (!query || nameMatch || descMatch) {
                 const relevance = nameMatch ? 1.0 : descMatch ? 0.7 : 0.5;
+                const desc = tool.description || '';
                 results.push({
                   server: hubServer.name,
                   tool: tool.name,
-                  description: tool.description || '',
+                  description: desc.length > 140 ? desc.slice(0, 140) + '…' : desc,
                   relevance,
                 });
               }
@@ -1606,6 +1608,56 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
           logger.warn('passthrough_call used in execution mode', { server, tool });
         }
 
+        // F10 (finding 33): Handle params that arrive as JSON strings or with type coercion issues.
+        // If params is a string, try to parse it as JSON; if it fails, return a clear error.
+        let normalizedParams: Record<string, unknown> = params || {};
+        if (typeof params === 'string') {
+          try {
+            const parsed = JSON.parse(params);
+            // Ensure parsed result is an object (not array or primitive)
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+              normalizedParams = parsed as Record<string, unknown>;
+            } else {
+              const durationMs = Date.now() - startTime;
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                      success: false,
+                      error: 'params was a JSON string but parsed to a non-object value',
+                    }),
+                  },
+                ],
+                structuredContent: {
+                  success: false,
+                  error: 'params was a JSON string but parsed to a non-object value',
+                  metrics: { duration_ms: durationMs, mode: 'passthrough' as const },
+                },
+              };
+            }
+          } catch (parseErr) {
+            const durationMs = Date.now() - startTime;
+            const errorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    success: false,
+                    error: `params was a JSON string that failed to parse: ${errorMsg}`,
+                  }),
+                },
+              ],
+              structuredContent: {
+                success: false,
+                error: `params was a JSON string that failed to parse: ${errorMsg}`,
+                metrics: { duration_ms: durationMs, mode: 'passthrough' as const },
+              },
+            };
+          }
+        }
+
         try {
           let result: unknown;
 
@@ -1622,9 +1674,9 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
 
             // Mock implementations
             if (server === 'echo' && tool === 'echo') {
-              result = { message: (params as Record<string, unknown>)?.['message'] || '' };
+              result = { message: normalizedParams?.['message'] || '' };
             } else if (server === 'echo' && tool === 'reverse') {
-              const msg = String((params as Record<string, unknown>)?.['message'] || '');
+              const msg = String(normalizedParams?.['message'] || '');
               result = { reversed: msg.split('').reverse().join('') };
             } else if (server === 'filesystem') {
               if (tool === 'list_directory') {
@@ -1637,7 +1689,7 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
             }
           } else {
             // Use real hub
-            result = await this.hub.callTool(server, tool, params || {});
+            result = await this.hub.callTool(server, tool, normalizedParams);
           }
 
           const durationMs = Date.now() - startTime;
