@@ -2726,12 +2726,31 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
   async start(): Promise<void> {
     // Initialise the MCP Hub (connect to real servers)
     if (!this.useMockServers) {
+      // Try lazy initialization if cache available
+      const conductorCfgLazy = loadConductorConfig();
+      const lazyConnect = conductorCfgLazy?.catalog?.lazy_connect !== false;
+      let usedCache = false;
+
+      if (lazyConnect) {
+        const cfgJson = JSON.stringify(this.config.servers || {});
+        const cached = await readCatalogCache(cfgJson);
+        if (cached) {
+          logger.info("Using cached catalog", { servers: cached.servers.length });
+          this.cachedCatalogServers = cached.servers;
+          this.usedCacheForInitialization = true;
+          this.setCatalogInstructions();
+          this._passthroughRegistrationComplete = true;
+          this.lazyHubInitializer = new LazyHubInitializer(this.hub);
+          usedCache = true;
+        }
+      }
+      if (!usedCache) {
       logger.info('Initialising MCP Hub...');
       // Check lazy_connect config and try to use cached catalog
       const conductorCfg_lazy = loadConductorConfig();
       const lazyConnectEnabled = conductorCfg_lazy?.catalog?.lazy_connect !== false;
       
-      let usedCache_local = false;
+      let usedCache = false;
       if (lazyConnectEnabled) {
         const configJson_local = JSON.stringify(this.config.servers || {});
         const cachedCatalog_local = await readCatalogCache(configJson_local);
@@ -2742,13 +2761,15 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
           this.cachedCatalogServers = cachedCatalog_local.servers;
           this.usedCacheForInitialization = true;
           this.setCatalogInstructions();
+      }  // end if (!usedCache)
+      await this.writeCatalogToCacheNow();
           this._passthroughRegistrationComplete = true;
           this.lazyHubInitializer = new LazyHubInitializer(this.hub);
-          usedCache_local = true;
+          usedCache = true;
         }
       }
       
-      if (!usedCache_local) {
+      if (!usedCache) {
         logger.info('Initializing MCP Hub...');
 
       }
@@ -2808,6 +2829,31 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       // client that sends initialize already sees the catalog.
       this.setCatalogInstructions();
     } else {
+          // Ensure hub initialized before tool calls (lazy init support)
+          if (this.lazyHubInitializer && !this.lazyHubInitializer.isInitialized()) {
+            await this.lazyHubInitializer.ensureInitialized();
+            await this.registry.refresh();
+            const conductorCfgNow = loadConductorConfig();
+            if (conductorCfgNow?.servers) {
+              applyPerServerRouting(
+                this.registry.getAllTools(),
+                conductorCfgNow.servers,
+                (s, n, m) => this.registry.annotate(s, n, m),
+              );
+            }
+            registerPassthroughTools(
+              this.registry,
+              this.server as unknown as import("./passthrough-registrar.js").McpServerLike,
+              this.hub,
+              undefined,
+              {
+                isEnabled: () => this.compareMode,
+                buildCompareStats: (s, t, p, d, b) =>
+                  this.buildCompareStatsForPassthrough(s, t, p, d, b),
+              },
+            );
+            await this.writeCatalogToCacheNow();
+          }
       // When useMockServers is active there are no passthrough tools to
       // register, but we mark the flag so the transport-connect guard below
       // does not need a separate branch.
@@ -3070,5 +3116,28 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
       toolsMap.set(name, tool);
     }
     return toolsMap;
+  }
+
+  private async writeCatalogToCacheNow(): Promise<void> {
+    try {
+      if (!this.hub || this.useMockServers) return;
+      const entries = this.buildCatalogEntries();
+      const configJson = JSON.stringify(this.config.servers || {});
+      const cachedServers: CachedServerCatalog[] = entries.map((e) => ({
+        name: e.name,
+        toolCount: e.toolCount,
+        summary: e.summary,
+        topTools: e.topTools,
+        status: e.status,
+        tools: this.hub.getServerTools(e.name).map((t) => ({
+          name: t.name,
+          description: t.description || "",
+          schema: (t.inputSchema as Record<string, unknown>) || undefined,
+        })),
+      }));
+      await writeCatalogCache(configJson, cachedServers);
+    } catch (err) {
+      logger.debug('Could not write catalog cache', { error: String(err) });
+    }
   }
 }
