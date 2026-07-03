@@ -7,6 +7,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-07-03
+
+Conductor adoption + token optimizations: catalog/instruction priming (F1-F3), resultTokensBudget config (F6), engine validation metrics (F8), generic param type coercion (F9), and passthrough_call param guard (F10). Validated 44.2% token reduction vs native on large-payload filter tasks.
+
+### Added
+
+- **F1-F3: Catalog/Instruction Priming for execute_code Adoption** — Auto-load MCP catalog and inject instruction priming on execute_code calls for seamless code-based tool access without explicit server listing
+- **F6: resultTokensBudget Configuration** — Surface result token cap config for execute_code result size constraints
+- **F8: Engine Validation Metrics** — compare_modes now uses real metrics constants instead of placeholders
+- **F10: passthrough_call JSON-String Parameter Guard** — Prevent JSON string params from double-encoding
+
+### Changed
+
+- **F9: Generic Parameter Type Coercion** — Passthrough tools coerce numeric params to declared schema types (fixes Brave count/offset bugs)
+- discover_tools descriptions capped at 140 chars for catalog brevity
+
+### Fixed
+
+- Engine benchmarked: 44.2% token reduction vs native on large-payload filter task (finding 31)
+
 ## [3.1.1] - 2026-05-06
 
 The multi-client patch. Setup wizard, export, and doctor now speak 10 MCP client dialects: Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor, Cline (VS Code), Zed, Continue.dev, OpenCode, Kimi Code. Pure additive — Claude-only behaviour unchanged via `--legacy` flag.
