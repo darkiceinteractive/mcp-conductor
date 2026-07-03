@@ -37,6 +37,7 @@ _(none)_
 - `src/watcher/config-watcher.ts` (importing 1 files)
 - `src/streaming/execution-stream.ts` (importing 1 files)
 - `src/skills/skills-engine.ts` (importing 1 files)
+- `src/server/passthrough-registrar.ts` (importing 1 files)
 - `src/runtime/pool/worker.ts` (importing 1 files)
 - `src/runtime/executor.ts` (importing 1 files)
 - `src/observability/replay.ts` (importing 1 files)

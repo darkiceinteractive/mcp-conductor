@@ -10,6 +10,7 @@
 - `src/config/index.ts` (used by 1 files)
 
 ## Imports out of this community
+- `test/unit/tool-annotations.test.ts` (importing 1 files)
 - `test/unit/token-savings-reporter.test.ts` (importing 1 files)
 - `test/unit/shutdown.test.ts` (importing 1 files)
 - `test/unit/metrics-collector.test.ts` (importing 1 files)

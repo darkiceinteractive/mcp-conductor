@@ -10,6 +10,7 @@
 
 ## Imports out of this community
 - `test/memory-leak/streaming-cleanup.test.ts` (importing 2 files)
+- `test/unit/tool-annotations.test.ts` (importing 1 files)
 - `test/unit/streaming.test.ts` (importing 1 files)
 - `test/unit/shutdown.test.ts` (importing 1 files)
 - `test/unit/memory-bounds.test.ts` (importing 1 files)

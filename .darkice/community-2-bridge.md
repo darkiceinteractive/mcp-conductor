@@ -1,8 +1,8 @@
 # Community 2 — Bridge
-4 files · 11008 tokens · 0% of project
+4 files · 11071 tokens · 0% of project
 
 ## Files
-- `src/bridge/http-server.ts` — (6096 tokens)
+- `src/bridge/http-server.ts` — (6159 tokens)
 - `src/bridge/pool.ts` — (3840 tokens)
 - `src/bridge/session-registry.ts` — (1003 tokens)
 - `src/bridge/index.ts` — (69 tokens)

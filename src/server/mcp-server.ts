@@ -170,11 +170,6 @@ export function trimResultToBudget(
   };
 }
 
-/** Default server-side result token cap applied when max_result_tokens is not
- *  explicitly set by the caller. Matches the audit recommendation of 2000
- *  tokens for lean defaults (overridable via config in a future pass). */
-const DEFAULT_MAX_RESULT_TOKENS = 2000;
-
 /**
  * MCP Executor Server
  */
@@ -206,6 +201,7 @@ export class MCPExecutorServer {
   private registry: ToolRegistry;
   private cache: CacheLayer;
   private gateway: ReliabilityGateway;
+  private readonly defaultMaxResultTokens: number;
 
   // Mock server data for testing when no real servers configured
   private mockServers: Map<string, { tools: Array<{ name: string; description: string }> }> = new Map();
@@ -223,6 +219,7 @@ export class MCPExecutorServer {
     this.config = config;
     this.useMockServers = options?.useMockServers ?? false;
     this.currentMode = config.execution.mode;
+    this.defaultMaxResultTokens = config.execution.resultTokensBudget ?? 2000;
 
     // Initialise mode handler
     this.modeHandler = new ModeHandler({
@@ -345,7 +342,7 @@ export class MCPExecutorServer {
     const budgetTokens =
       maxResultTokensParam !== undefined
         ? maxResultTokensParam
-        : DEFAULT_MAX_RESULT_TOKENS;
+        : this.defaultMaxResultTokens;
 
     let resultValue = result.result;
     let resultTrimmedMeta: Record<string, unknown> | undefined;
@@ -827,7 +824,7 @@ export class MCPExecutorServer {
           max_result_tokens: z.number().optional().describe(
             'Cap the result to approximately this many tokens. If the result exceeds the budget ' +
             'it is progressively trimmed (arrays truncated, deep structures clipped) and ' +
-            'result_trimmed metadata is attached. Default: 2000. Set to 0 to disable trimming.',
+            'result_trimmed metadata is attached. Default: configured execution.resultTokensBudget (default 2000). Set to 0 to disable trimming.',
           ),
         },
         outputSchema: {

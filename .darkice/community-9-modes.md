@@ -10,6 +10,7 @@
 - `src/config/index.ts` (used by 1 files)
 
 ## Imports out of this community
+- `test/unit/tool-annotations.test.ts` (importing 1 files)
 - `test/unit/shutdown.test.ts` (importing 1 files)
 - `test/unit/mode-handler.test.ts` (importing 1 files)
 - `test/unit/execute-code-progress.test.ts` (importing 1 files)
