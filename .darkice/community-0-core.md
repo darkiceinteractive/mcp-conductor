@@ -1,5 +1,5 @@
 # Community 0 — Core
-606 files · 2207712 tokens · 93% of project
+608 files · 2209068 tokens · 92% of project
 
 ## Files
 - `Archive.zip` — (629859 tokens)
@@ -60,11 +60,11 @@
 - `scripts/run-benchmarks.ts` — (4808 tokens)
 - `test/integration/real-mcp/connection-resilience.test.ts` — (4796 tokens)
 - `test/fixtures/workflow-fixtures.ts` — (4720 tokens)
+- `CHANGELOG.md` — (4438 tokens)
 - `test/popular-mcps/token-savings/token-savings.test.ts` — (4438 tokens)
 - `coverage/lcov-report/prettify.js` — (4397 tokens)
 - `coverage/prettify.js` — (4397 tokens)
 - `_plans/v4-future/mesh-explainer.md` — (4293 tokens)
-- `CHANGELOG.md` — (4137 tokens)
 - `test/unit/diag-mode.test.ts` — (4127 tokens)
 - `test/integration/token-savings.test.ts` — (4092 tokens)
 - `docs/findings/2026-06-12-perf-audit/08-discover-tools-deep.md` — (4041 tokens)
@@ -350,6 +350,7 @@
 - `test/unit/shutdown.test.ts` — (1026 tokens)
 - `test/unit/compare-mode.test.ts` — (1019 tokens)
 - `test/unit/bridge-security.test.ts` — (994 tokens)
+- `test/unit/passthrough-call-handler.test.ts` — (992 tokens)
 - `test/unit/registry/snapshot.test.ts` — (987 tokens)
 - `docs-site/docs/v3/configuration.md` — (977 tokens)
 - `docs-site/versioned_docs/version-2.0/v3/configuration.md` — (977 tokens)
@@ -576,6 +577,7 @@
 - `docs/benchmarks/stress/broadcast-storm-2026-05-07.json` — (85 tokens)
 - `docs/benchmarks/stress/broadcast-storm-2026-06-12.json` — (85 tokens)
 - `docs-site/blog/2019-05-28-first-blog-post.mdx` — (77 tokens)
+- `test/integration/live-cli/KNOWN-ENV-LIMITATION.md` — (63 tokens)
 - `test/fixtures/recordings/filesystem/_defaults.json` — (61 tokens)
 - `test/fixtures/recordings/gdrive/_defaults.json` — (61 tokens)
 - `docs-site/.gitignore` — (58 tokens)

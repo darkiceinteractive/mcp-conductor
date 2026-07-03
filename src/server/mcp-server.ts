@@ -46,6 +46,8 @@ import { exportToClaude } from '../cli/commands/export-servers.js';
 import { testServer } from '../cli/commands/test-server.js';
 import { getRoutingRecommendations } from '../cli/commands/routing.js';
 import { CacheLayer } from '../cache/index.js';
+import { readCatalogCache, writeCatalogCache, getConfigHash, type CachedServerCatalog } from '../cache/catalog-cache.js';
+import { LazyHubInitializer } from './lazy-hub-init.js';
 import { ReliabilityGateway } from '../reliability/index.js';
 import {
   setDiagMode,

@@ -1,8 +1,8 @@
 # Project Index — mcp-executor-darkice
-Generated: 2026-07-03T03:05:16.909506+00:00 | Branch: none | Files: 719 | Est. tokens: 2,374,203
+Generated: 2026-07-03T08:07:53.665411+00:00 | Branch: none | Files: 724 | Est. tokens: 2,406,634
 
 ## Languages
-Other: 384 files (53%) · Typescript: 326 files (45%) · Javascript: 7 files (1%) · Tsx: 2 files (0%)
+Other: 385 files (53%) · Typescript: 330 files (46%) · Javascript: 7 files (1%) · Tsx: 2 files (0%)
 
 ## Entry Points (God Nodes)
 - `src/utils/index.ts` — (109 tokens)
@@ -12,7 +12,7 @@ Other: 384 files (53%) · Typescript: 326 files (45%) · Javascript: 7 files (1%
 - `src/cli/clients/adapter.ts` — (1132 tokens)
 
 ## Communities
-### Community 0 — Core (606 files)
+### Community 0 — Core (608 files)
 Key files: `Archive.zip`, `docs-site/package-lock.json`, `package-lock.json`
 See: .darkice/community-0-core.md
 
@@ -24,8 +24,8 @@ See: .darkice/community-1-bin.md
 Key files: `src/bridge/http-server.ts`, `src/bridge/pool.ts`, `src/bridge/session-registry.ts`
 See: .darkice/community-2-bridge.md
 
-### Community 3 — Cache (8 files)
-Key files: `src/cache/disk.ts`, `src/cache/cache.ts`, `src/cache/delta.ts`
+### Community 3 — Cache (9 files)
+Key files: `src/cache/disk.ts`, `src/cache/cache.ts`, `src/cache/catalog-cache.ts`
 See: .darkice/community-3-cache.md
 
 ### Community 4 — Cli (22 files)
@@ -68,8 +68,8 @@ See: .darkice/community-12-reliability.md
 Key files: `src/runtime/executor.ts`, `src/runtime/pool/worker.ts`, `src/runtime/helpers/worker-preload.ts`
 See: .darkice/community-13-runtime.md
 
-### Community 14 — Server (4 files)
-Key files: `src/server/passthrough-registrar.ts`, `src/server/catalog.ts`, `src/server/diag-mode.ts`
+### Community 14 — Server (6 files)
+Key files: `src/server/mcp-server.ts`, `src/server/passthrough-registrar.ts`, `src/server/catalog.ts`
 See: .darkice/community-14-server.md
 
 ### Community 15 — Skills (2 files)
@@ -90,10 +90,16 @@ See: .darkice/community-18-watcher.md
 
 ## Recent Changes
 Files modified in last 24h:
-- `test/unit/tool-annotations.test.ts` — 3m ago
-- `test/unit/passthrough-registrar.test.ts` — 3m ago
-- `src/server/passthrough-registrar.ts` — 3m ago
-- `src/bridge/http-server.ts` — 3m ago
-- `test/unit/diag-mode.test.ts` — 3m ago
-- `test/unit/catalog.test.ts` — 3m ago
-- `src/server/catalog.ts` — 3m ago
+- `src/server/mcp-server.ts` — 0m ago
+- `src/server/lazy-hub-init.ts` — 10m ago
+- `src/cache/catalog-cache.ts` — 21m ago
+- `package.json` — 2h ago
+- `CHANGELOG.md` — 2h ago
+- `test/unit/passthrough-call-handler.test.ts` — 2h ago
+- `test/integration/live-cli/KNOWN-ENV-LIMITATION.md` — 2h ago
+- `test/unit/tool-annotations.test.ts` — 5h ago
+- `test/unit/passthrough-registrar.test.ts` — 5h ago
+- `src/server/passthrough-registrar.ts` — 5h ago
+- src/ — 2 more files modified
+- test/ — 2 more files modified
+Showing top 10; +4 more changed in last 24h.

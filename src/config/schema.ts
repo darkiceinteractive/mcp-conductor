@@ -136,6 +136,13 @@ export interface CatalogConfig {
    * if the full text would exceed this. Default: 1200.
    */
   instructions_budget_tokens?: number;
+  /**
+   * When true (default), skip connecting backends at startup if a valid catalog cache
+   * exists. Backends are connected lazily on first tool call. When false, all backends
+   * are eagerly connected at startup (pre-v4 behavior).
+   * Default: true.
+   */
+  lazy_connect?: boolean;
 }
 
 /**
