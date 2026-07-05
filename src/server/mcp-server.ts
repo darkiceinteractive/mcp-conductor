@@ -676,6 +676,16 @@ export class MCPExecutorServer {
         buildServerSummary(name, data.tools, 'connected')
       );
     }
+    // If we have cached catalog servers (lazy initialization path), use them
+    if (this.cachedCatalogServers && this.cachedCatalogServers.length > 0) {
+      return this.cachedCatalogServers.map((cached) => ({
+        name: cached.name,
+        toolCount: cached.toolCount,
+        summary: cached.summary,
+        topTools: cached.topTools,
+        status: cached.status,
+      }));
+    }
     return this.hub.listServers().map((s) => {
       const tools = this.hub.getServerTools(s.name);
       const status: ServerCatalogEntry['status'] =
@@ -686,6 +696,57 @@ export class MCPExecutorServer {
           : 'connecting';
       return buildServerSummary(s.name, tools, status);
     });
+  }
+
+  /**
+   * Ensure the hub is initialized (for lazy initialization support).
+   * If lazy initialization is enabled and the hub hasn't been initialized yet,
+   * this will trigger hub.initialise(), registry refresh, and tool registration.
+   */
+  private async ensureHubInitialized(): Promise<void> {
+    if (!this.lazyHubInitializer) {
+      return; // Not using lazy initialization
+    }
+    if (this.lazyHubInitializer.isInitialized()) {
+      return; // Already initialized
+    }
+    // Trigger lazy initialization
+    await this.lazyHubInitializer.ensureInitialized();
+    
+    // Refresh registry and register tools
+    await this.registry.refresh();
+    
+    // Apply routing recommendations
+    const conductorCfg = loadConductorConfig();
+    applyBuiltInRecommendations(
+      this.registry.getAllTools(),
+      (server, name, meta) => this.registry.annotate(server, name, meta)
+    );
+    
+    // Apply per-server routing overrides
+    if (conductorCfg?.servers) {
+      applyPerServerRouting(
+        this.registry.getAllTools(),
+        conductorCfg.servers,
+        (server, name, meta) => this.registry.annotate(server, name, meta),
+      );
+    }
+    
+    // Register passthrough tools
+    registerPassthroughTools(
+      this.registry,
+      this.server as unknown as import('./passthrough-registrar.js').McpServerLike,
+      this.hub,
+      undefined,
+      {
+        isEnabled: () => this.compareMode,
+        buildCompareStats: (server, tool, params, dur, bytes) =>
+          this.buildCompareStatsForPassthrough(server, tool, params, dur, bytes),
+      },
+    );
+    
+    // Write cache for next time
+    await this.writeCatalogToCacheNow();
   }
 
   /**
@@ -1696,6 +1757,7 @@ Only use for debugging raw tool input/output. Use execute_code for all normal op
             }
           } else {
             // Use real hub
+            await this.ensureHubInitialized();
             result = await this.hub.callTool(server, tool, normalizedParams);
           }
 
@@ -1858,6 +1920,7 @@ Routes to brave-search MCP server internally. Requires brave-search server to be
 
         try {
           // Route to brave-search MCP server
+          await this.ensureHubInitialized();
           const rawResult = await this.hub.callTool('brave-search', 'brave_web_search', {
             query,
             count: resultCount,
@@ -2744,6 +2807,7 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
           this.setCatalogInstructions();
           this.lazyHubInitializer = new LazyHubInitializer(this.hub);
           usedCache = true;
+          // Mark registration complete: passthrough tools will be registered lazily when ensureHubInitialized() is called
           this._passthroughRegistrationComplete = true;
         }
       }
@@ -2876,6 +2940,9 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
 
           throw new Error(`Unknown tool: ${serverName}.${toolName}`);
         } else {
+          // Ensure hub is initialized for real server calls
+          await this.ensureHubInitialized();
+          
           // Check registry for X4 redact annotation on this tool
           const toolDef = this.registry.getTool(serverName, toolName);
           const matchers = toolDef?.redact?.response ?? [];
@@ -2884,6 +2951,7 @@ Formats: "claude-desktop" (full wrapper object), "claude-code" (flat mcpServers)
           // caching would store tokenized values that cannot be reverse-mapped
           // after a cache eviction. Skip cache for this path.
           if (matchers.length > 0) {
+            await this.ensureHubInitialized();
             const _obsStart = Date.now();
             const { result, reverseMap } = await this.hub.callToolTokenized(
               serverName,
