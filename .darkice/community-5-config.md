@@ -11,6 +11,7 @@
 - `src/cli/clients/registry.ts` (used by 1 files)
 
 ## Imports out of this community
+- `src/index.ts` (importing 2 files)
 - `test/unit/tool-annotations.test.ts` (importing 1 files)
 - `test/unit/token-savings-reporter.test.ts` (importing 1 files)
 - `test/unit/metrics-collector.test.ts` (importing 1 files)
@@ -20,7 +21,6 @@
 - `src/runtime/executor.ts` (importing 1 files)
 - `src/modes/mode-handler.ts` (importing 1 files)
 - `src/metrics/metrics-collector.ts` (importing 1 files)
-- `src/index.ts` (importing 1 files)
 - `src/hub/mcp-hub.ts` (importing 1 files)
 - `src/cli/commands/routing.ts` (importing 1 files)
 - `src/bridge/http-server.ts` (importing 1 files)

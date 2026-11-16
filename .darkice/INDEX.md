@@ -1,5 +1,5 @@
 # Project Index — mcp-executor-darkice
-Generated: 2026-07-03T08:15:33.619894+00:00 | Branch: none | Files: 724 | Est. tokens: 2,407,636
+Generated: 2026-07-05T01:36:55.673194+00:00 | Branch: none | Files: 724 | Est. tokens: 2,407,580
 
 ## Languages
 Other: 385 files (53%) · Typescript: 330 files (46%) · Javascript: 7 files (1%) · Tsx: 2 files (0%)
@@ -91,15 +91,3 @@ See: .darkice/community-18-watcher.md
 ## Recent Changes
 Files modified in last 24h:
 - `src/server/mcp-server.ts` — 0m ago
-- `src/server/lazy-hub-init.ts` — 18m ago
-- `src/cache/catalog-cache.ts` — 29m ago
-- `package.json` — 2h ago
-- `CHANGELOG.md` — 2h ago
-- `test/unit/passthrough-call-handler.test.ts` — 2h ago
-- `test/integration/live-cli/KNOWN-ENV-LIMITATION.md` — 2h ago
-- `test/unit/tool-annotations.test.ts` — 5h ago
-- `test/unit/passthrough-registrar.test.ts` — 5h ago
-- `src/server/passthrough-registrar.ts` — 5h ago
-- src/ — 2 more files modified
-- test/ — 2 more files modified
-Showing top 10; +4 more changed in last 24h.

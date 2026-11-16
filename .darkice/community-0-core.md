@@ -1,5 +1,5 @@
 # Community 0 — Core
-608 files · 2209068 tokens · 92% of project
+608 files · 2209115 tokens · 92% of project
 
 ## Files
 - `Archive.zip` — (629859 tokens)
@@ -303,6 +303,7 @@
 - `test/helpers/conditional-tests.ts` — (1211 tokens)
 - `coverage/lcov-report/streaming/index.ts.html` — (1208 tokens)
 - `coverage/streaming/index.ts.html` — (1208 tokens)
+- `src/index.ts` — (1206 tokens)
 - `coverage/lcov-report/skills/index.ts.html` — (1205 tokens)
 - `coverage/skills/index.ts.html` — (1205 tokens)
 - `docs/v3/recipes.md` — (1201 tokens)
@@ -317,7 +318,6 @@
 - `scripts/setup.sh` — (1178 tokens)
 - `test/integration/live-cli/helpers/cli-runner.ts` — (1170 tokens)
 - `wiki/Sandbox-API-Reference.md` — (1165 tokens)
-- `src/index.ts` — (1159 tokens)
 - `test/unit/per-server-routing.test.ts` — (1151 tokens)
 - `wiki/Benchmark-Methodology.md` — (1145 tokens)
 - `test/integration/cli-end-to-end.test.ts` — (1131 tokens)
@@ -633,6 +633,7 @@
 - `src/runtime/findtool/vector-index.ts` (used by 2 files)
 - `src/reliability/profile.ts` (used by 2 files)
 - `src/registry/built-in-recommendations.ts` (used by 2 files)
+- `src/config/defaults.ts` (used by 2 files)
 - `src/cli/commands/export-servers.ts` (used by 2 files)
 - `src/cli/commands/doctor.ts` (used by 2 files)
 - `src/watcher/config-watcher.ts` (used by 1 files)
@@ -669,7 +670,6 @@
 - `src/daemon/shared-lock.ts` (used by 1 files)
 - `src/daemon/shared-kv.ts` (used by 1 files)
 - `src/daemon/discovery.ts` (used by 1 files)
-- `src/config/defaults.ts` (used by 1 files)
 - `src/cli/commands/routing.ts` (used by 1 files)
 - `src/cli/commands/import-servers.ts` (used by 1 files)
 - `src/cli/clients/zed.ts` (used by 1 files)
